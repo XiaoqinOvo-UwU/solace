@@ -23,33 +23,60 @@ Rectangle {
         return db
     }
 
+    // WeChat-style time text: same day -> 下午 3:45 ; yesterday -> 昨天 23:10 ; older -> 8月12日 09:05
+    function fmtTime(ts) {
+        var d = new Date(ts)
+        var now = new Date()
+        var pad = function(n) { return (n < 10 ? "0" : "") + n }
+        var h12 = d.getHours() % 12
+        if (h12 === 0) h12 = 12
+        var hm = (d.getHours() < 12 ? "上午 " : "下午 ") + h12 + ":" + pad(d.getMinutes())
+        var dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+        var yestStart = dayStart - 24 * 3600 * 1000
+        if (d.getTime() >= dayStart) return hm
+        if (d.getTime() >= yestStart) return "昨天 " + hm
+        return (d.getMonth() + 1) + "月" + d.getDate() + "日 " + hm
+    }
+
+    // 10 minutes = gap threshold for a time separator
+    property int gapThresholdMs: 10 * 60 * 1000
+
     function loadChat(contactId) {
         var db = chatDb()
         db.transaction(function(tx) {
-            tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT)")
-            var rs = tx.executeSql("SELECT isAi, msg FROM messages WHERE contact=? ORDER BY id", [contactId])
+            tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT, ts INTEGER)")
+            try { tx.executeSql("ALTER TABLE messages ADD COLUMN ts INTEGER") } catch (e) { }
+            var rs = tx.executeSql("SELECT isAi, msg, ts FROM messages WHERE contact=? ORDER BY id", [contactId])
             msgModel.clear()
             var hist = []
+            var prevTs = -1
             for (var i = 0; i < rs.rows.length; i++) {
                 var isAi = rs.rows.item(i).isAi === 1
                 var msg = rs.rows.item(i).msg
-                msgModel.append({ "isAi": isAi, "msg": msg })
+                var ts = rs.rows.item(i).ts
+                var timeLabel = ""
+                if (ts > 0 && prevTs > 0 && (ts - prevTs) > chatPage.gapThresholdMs)
+                    timeLabel = fmtTime(ts)
+                if (ts > 0) prevTs = ts
+                msgModel.append({ "isAi": isAi, "msg": msg, "timeLabel": timeLabel, "grouped": false })
                 hist.push((isAi ? aiService.aiName() : (aiService.userName() || "用户")) + ": " + msg)
             }
+            chatPage.lastMsgTs = prevTs
             // seed AI context with this conversation so it can see past messages
             aiService.setChatHistory(hist.join("\n"))
         })
         // if this contact has no history yet, show a greeting bubble
         if (msgModel.count === 0)
-            msgModel.append({ "isAi": true, "msg": "你好，我是" + aiService.aiName() + "。" })
+            msgModel.append({ "isAi": true, "msg": "你好，我是" + aiService.aiName() + "。", "timeLabel": "", "grouped": false })
         Qt.callLater(function() { msgView.positionViewAtEnd() })
     }
 
-    function saveMsg(contactId, isAi, msg) {
+    function saveMsg(contactId, isAi, msg, ts) {
         var db = chatDb()
         db.transaction(function(tx) {
-            tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT)")
-            tx.executeSql("INSERT INTO messages (contact, isAi, msg) VALUES (?,?,?)", [contactId, isAi ? 1 : 0, msg])
+            tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT, ts INTEGER)")
+            try { tx.executeSql("ALTER TABLE messages ADD COLUMN ts INTEGER") } catch (e) { }
+            tx.executeSql("INSERT INTO messages (contact, isAi, msg, ts) VALUES (?,?,?,?)", [contactId, isAi ? 1 : 0, msg, ts || Date.now()])
             // keep history bounded (last 400)
             tx.executeSql("DELETE FROM messages WHERE id NOT IN (SELECT id FROM messages WHERE contact=? ORDER BY id DESC LIMIT 400)", [contactId])
         })
@@ -292,7 +319,19 @@ Rectangle {
             delegate: Item {
                 id: delegateRoot
                 width: msgView.width
-                height: Math.max(44, bubbleRow.height) + 14
+                height: Math.max(44, bubbleRow.height)
+                       + (model.timeLabel.length > 0 ? 30 : (model.grouped ? 4 : 14))
+
+                // centered WeChat-style time separator for long gaps
+                Text {
+                    visible: model.timeLabel.length > 0
+                    text: model.timeLabel
+                    color: Theme.textDim
+                    font.pixelSize: 10
+                    opacity: 0.7
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
 
                 // TG-style message enter animation: slide up + fade in + subtle pop
                 transform: Translate { id: msgTrans; y: 16 }
@@ -312,7 +351,8 @@ Rectangle {
                     width: msgView.width
                     height: bubble.height
                     anchors.top: parent.top
-                    anchors.topMargin: 8
+                    anchors.topMargin: model.timeLabel.length > 0 ? 26
+                                     : (model.grouped ? 0 : 8)
 
                     // avatars: AI left, user right (36px — readable next to bubbles)
                     Avatar {
@@ -333,7 +373,9 @@ Rectangle {
                         anchors.right: parent.right
                         anchors.rightMargin: 12
                         anchors.top: parent.top
-                        visible: !model.isAi
+                        // consecutive user messages (batch) hide the avatar —
+                        // only the first of the group keeps it (WeChat-style)
+                        visible: !model.isAi && !model.grouped
                     }
 
                     MessageBubble {
@@ -468,22 +510,70 @@ Rectangle {
         }
     }
 
+    // ts of the last message in the conversation (for gap detection)
+    property var lastMsgTs: -1
+
+    // ---- multi-message batching: every send opens a short merge window.
+    // Messages typed close together are joined into ONE request, so the AI
+    // reads them all at once and answers once (WeChat-style multi-send).
+    // While a request is in flight, further windows queue behind it.
+    property bool aiBusy: false
+    property var sendBuffer: []        // messages in the current window
+    property string pendingMerged: ""  // merged text waiting for AI idle
+
     function sendMsg() {
         var t = chatInput.text.trim()
         if (t.length === 0) return
-        // critical path first: clear input + send to AI, so a DB hiccup never
-        // blocks the message or leaves the input text stuck
         chatInput.text = ""
-        msgModel.append({ "isAi": false, "msg": t })
-        msgModel.append({ "isAi": true, "msg": "..." })
+
+        var now = Date.now()
+        // long gap (>= 10 min): show a WeChat-style time separator + tell the
+        // AI how long it has been since the previous message
+        var gapPrefix = ""
+        var timeLabel = ""
+        if (chatPage.lastMsgTs > 0 && (now - chatPage.lastMsgTs) > chatPage.gapThresholdMs) {
+            timeLabel = fmtTime(now)
+            gapPrefix = "[距上次消息约 " + Math.round((now - chatPage.lastMsgTs) / 60000) + " 分钟]\n"
+        }
+        chatPage.lastMsgTs = now
+
+        // consecutive user bubbles stack tightly (avatar hidden after the first)
+        var grouped = false
+        if (msgModel.count > 0 && !msgModel.get(msgModel.count - 1).isAi)
+            grouped = true
+        msgModel.append({ "isAi": false, "msg": t, "timeLabel": timeLabel, "grouped": grouped })
         Qt.callLater(function() { msgView.positionViewAtEnd() })
-        setHeaderStatus(aiService.aiName() + " 正在输入...")
-        aiService.sendMessage(t)
+
+        chatPage.sendBuffer.push(gapPrefix + t)
         // persistence is best-effort; never let it break the chat
         try {
             var cid = currentContactId.length > 0 ? currentContactId : contactService.currentId()
-            if (cid.length > 0) saveMsg(cid, false, t)
+            if (cid.length > 0) saveMsg(cid, false, t, now)
         } catch (e) { }
+        mergeTimer.restart()
+    }
+
+    // merge window closed: ship everything typed in this window as one request
+    function fireSend() {
+        if (chatPage.sendBuffer.length === 0) return
+        var merged = chatPage.sendBuffer.splice(0, chatPage.sendBuffer.length).join("\n")
+        if (chatPage.aiBusy) {
+            // a request is already in flight — queue behind it
+            chatPage.pendingMerged = chatPage.pendingMerged.length > 0
+                ? chatPage.pendingMerged + "\n" + merged
+                : merged
+            return
+        }
+        chatPage.aiBusy = true
+        setHeaderStatus(aiService.aiName() + " 正在输入...")
+        aiService.sendMessage(merged)
+    }
+
+    Timer {
+        id: mergeTimer
+        interval: 1500          // messages sent within this window merge into one
+        repeat: false
+        onTriggered: chatPage.fireSend()
     }
 
     function setHeaderStatus(s) {
@@ -501,20 +591,9 @@ Rectangle {
         var parts = text.split(/\r?\n/).map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
         if (parts.length === 0) parts = [text]
 
-        // for each part: ensure a placeholder bubble, then queue it
+        // no placeholder bubbles — replies simply appear after their
+        // "typing" delay (real-chat feel, nothing shows until it's sent)
         for (var p = 0; p < parts.length; p++) {
-            // find an existing "..." placeholder bubble to reuse
-            var hasPlaceholder = false
-            for (var i = 0; i < msgModel.count; i++) {
-                if (msgModel.get(i).isAi && msgModel.get(i).msg === "...") {
-                    hasPlaceholder = true
-                    break
-                }
-            }
-            if (!hasPlaceholder) {
-                msgModel.append({ "isAi": true, "msg": "..." })
-                Qt.callLater(function() { msgView.positionViewAtEnd() })
-            }
             // typing speed ~ 120ms per char, clamp to 1.5s ~ 12s
             var ms = Math.round(parts[p].length * 120)
             ms = Math.max(1500, Math.min(ms, 12000))
@@ -528,15 +607,16 @@ Rectangle {
     // (no typing queue) AND persists to the chat DB so it appears in history
     function insertAiMessage(text) {
         if (!text || text.trim().length === 0) return
-        msgModel.append({ "isAi": true, "msg": text })
+        msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false })
         Qt.callLater(function() { msgView.positionViewAtEnd() })
         try {
             var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()
             if (cid.length > 0) {
                 var db = chatDb()
                 db.transaction(function(tx) {
-                    tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT)")
-                    tx.executeSql("INSERT INTO messages (contact, isAi, msg) VALUES (?,1,?)", [cid, text])
+                    tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT, ts INTEGER)")
+                    try { tx.executeSql("ALTER TABLE messages ADD COLUMN ts INTEGER") } catch (e) { }
+                    tx.executeSql("INSERT INTO messages (contact, isAi, msg, ts) VALUES (?,1,?,?)", [cid, text, Date.now()])
                 })
                 chatPage.messageSaved(cid, true, text)
             }
@@ -566,18 +646,9 @@ Rectangle {
         repeat: false
         onTriggered: {
             replyBusy = false
-            // reveal this reply in the first pending "..." placeholder bubble
+            // reveal this reply — no placeholder to fill, just append
             var text = chatPage.pendingReply
-            var filled = false
-            for (var i = 0; i < msgModel.count; i++) {
-                if (msgModel.get(i).isAi && msgModel.get(i).msg === "...") {
-                    msgModel.set(i, { "isAi": true, "msg": text })
-                    filled = true
-                    break
-                }
-            }
-            if (!filled)
-                msgModel.append({ "isAi": true, "msg": text })
+            msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false })
             Qt.callLater(function() { msgView.positionViewAtEnd() })
             // persistence (best-effort)
             try {
@@ -585,14 +656,26 @@ Rectangle {
                 if (cid.length > 0) {
                     var db = chatDb()
                     db.transaction(function(tx) {
-                        tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT)")
-                        tx.executeSql("INSERT INTO messages (contact, isAi, msg) VALUES (?,1,?)", [cid, text])
+                        tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT, ts INTEGER)")
+                        try { tx.executeSql("ALTER TABLE messages ADD COLUMN ts INTEGER") } catch (e) { }
+                        tx.executeSql("INSERT INTO messages (contact, isAi, msg, ts) VALUES (?,1,?,?)", [cid, text, Date.now()])
                     })
                     chatPage.messageSaved(cid, true, text)
                 }
             } catch (e) { }
             // process the next queued reply (if any)
             chatPage.pumpReplies()
+            // all replies done -> free the busy flag and send queued merges
+            if (!replyBusy && replyQueue.length === 0) {
+                chatPage.aiBusy = false
+                if (chatPage.pendingMerged.length > 0) {
+                    var queued = chatPage.pendingMerged
+                    chatPage.pendingMerged = ""
+                    chatPage.aiBusy = true
+                    setHeaderStatus(aiService.aiName() + " 正在输入...")
+                    aiService.sendMessage(queued)
+                }
+            }
         }
     }
 
