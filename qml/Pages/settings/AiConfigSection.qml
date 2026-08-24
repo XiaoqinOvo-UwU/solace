@@ -129,20 +129,35 @@ SettingsSectionCard {
         wrapMode: Text.Wrap
     }
 
-    // Persist the current field values to the ACTIVE config AND to the
-    // dedicated custom slot — manual edits are by definition "my custom setup",
-    // so this is where 自定义 gets its content from.
-    function saveConfig() {
+    // Persist fields to the ACTIVE config only. Used by presets — switching
+    // providers must NEVER touch the dedicated custom slot.
+    function saveActiveConfig() {
         var url = editBaseUrl.text.trim()
         var key = editApiKey.text.trim()
         var model = editModel.text.trim()
-        // never persist a broken config (empty model/url = relay 404s)
         if (url.length === 0 || model.length === 0) {
             appCore.showToast("Base URL 和模型名不能为空，请填写后再保存")
             return false
         }
-        // core config first — must never be blocked by the
-        // optional key-memory call below
+        aiService.setApiBaseUrl(url)
+        aiService.setApiModel(model)
+        aiService.setApiKey(key)
+        if (key.length > 0 && aiService.rememberApiKeyFor)
+            aiService.rememberApiKeyFor(url, key)
+        section.notify("AI 配置已保存~")
+        return true
+    }
+
+    // Manual save: persists to the ACTIVE config AND the custom slot —
+    // hand-edited fields are by definition the user's own setup.
+    function saveConfig() {
+        var url = editBaseUrl.text.trim()
+        var key = editApiKey.text.trim()
+        var model = editModel.text.trim()
+        if (url.length === 0 || model.length === 0) {
+            appCore.showToast("Base URL 和模型名不能为空，请填写后再保存")
+            return false
+        }
         aiService.setApiBaseUrl(url)
         aiService.setApiModel(model)
         aiService.setApiKey(key)
@@ -163,7 +178,7 @@ SettingsSectionCard {
             var k = aiService.apiKeyFor(presetUrl)
             if (k.length > 0) editApiKey.text = k
         }
-        if (section.saveConfig())
+        if (section.saveActiveConfig())
             appCore.showToast("已切换并保存为 " + presetLabel)
     }
 

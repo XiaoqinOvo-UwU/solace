@@ -152,9 +152,33 @@ void AiService::recordSessionStart()
     if (!lastEnd.isEmpty()) {
         QDateTime le = QDateTime::fromString(lastEnd, Qt::ISODate);
         if (le.isValid()) {
-            // if last session ended in early morning, remember sleep habit
-            if (le.time().hour() >= 23 || le.time().hour() < 3) {
-                mem = jsonSet(mem, "sleepHabit", "凌晨" + QString::number(le.time().hour() + 1) + "点");
+            // sleep-time inference: the PC was off for a long stretch after the
+            // last session ended and wasn't restarted in between — that's when
+            // the user was asleep (any hour counts: they may nap at 6pm too).
+            // 90+ minutes off excludes reboots and short breaks.
+            qint64 gapSec = le.secsTo(now);
+            if (gapSec >= 90 * 60) {
+                int sh = le.time().hour();
+                int sm = le.time().minute();
+                QString sleepDate = le.date().toString("yyyy-MM-dd");
+                // consecutive-day streak for late-night (凌晨) sleeps
+                int streak = 1;
+                if (sh < 5) {
+                    QString prevDate = jsonGet(mem, "sleepLastDate");
+                    if (!prevDate.isEmpty()
+                        && QDate::fromString(prevDate, "yyyy-MM-dd").addDays(1).toString("yyyy-MM-dd") == sleepDate)
+                        streak = jsonGet(mem, "sleepStreak").toInt() + 1;
+                }
+                mem = jsonSet(mem, "sleepHour", QString::number(sh));
+                mem = jsonSet(mem, "sleepMin", QString::number(sm));
+                mem = jsonSet(mem, "sleepGapMin", QString::number(gapSec / 60));
+                mem = jsonSet(mem, "sleepLastDate", sleepDate);
+                mem = jsonSet(mem, "sleepStreak", QString::number(streak));
+                // keep the plain label for memory reports
+                QString period = (sh < 5) ? "凌晨" : (sh < 11) ? "早上"
+                               : (sh < 14) ? "中午" : (sh < 18) ? "下午" : "晚上";
+                mem = jsonSet(mem, "sleepHabit", period + QString::number(sh) + "点"
+                                + (sm >= 30 ? "半" : ""));
             }
             // shutdown/rest detection: long gap since the last session end means
             // the PC was off (or the user was away). Write a short-term memory note.
@@ -373,6 +397,15 @@ void AiService::markGreeted()
 }
 
 // ---- greeting ----
+static QString cnHour(int h)
+{
+    static const char *nums[] = { "零","一","二","三","四","五","六","七","八","九","十",
+        "十一","十二","十三","十四","十五","十六","十七","十八","十九","二十",
+        "二十一","二十二","二十三" };
+    if (h >= 0 && h <= 23) return QString::fromUtf8(nums[h]);
+    return QString::number(h);
+}
+
 QString AiService::greeting()
 {
     QString mem = readMemory();
@@ -408,10 +441,35 @@ QString AiService::greeting()
     if (edits > 0)
         lines << QString("你的小说文档昨天修改了 %1 次。").arg(edits);
 
-    // sleep habit
-    QString sleepHabit = jsonGet(mem, "sleepHabit");
-    if (!sleepHabit.isEmpty())
-        lines << "另外……你又" + sleepHabit + "睡觉。";
+    // sleep habit — categorized by when the user actually slept last night
+    {
+        QString sleepDate = jsonGet(mem, "sleepLastDate");
+        QString yesterday = QDate::currentDate().addDays(-1).toString("yyyy-MM-dd");
+        if (sleepDate == yesterday) {
+            int sh = jsonGet(mem, "sleepHour").toInt();
+            int sm = jsonGet(mem, "sleepMin").toInt();
+            qint64 gapMin = jsonGet(mem, "sleepGapMin").toLongLong();
+            int streak = jsonGet(mem, "sleepStreak").toInt();
+            if (sh < 5) {                       // 凌晨
+                if (streak >= 3)
+                    lines << "另外……你又熬夜了，连续好几天了，注意身体哦";
+                else
+                    lines << "另外，你昨天晚上凌晨睡觉，下次不要这样了哦";
+            } else if (sh < 11) {               // 早上
+                lines << "又通宵了？你呀，今天犯困可得靠自己了哦";
+            } else if (sh < 14) {               // 中午
+                if (gapMin >= 6 * 60)
+                    lines << "另外，你昨天中午就睡了，直接睡到了第二天，看来是真累了";
+                else
+                    lines << "另外，你昨天中午睡了个午觉，休息得怎么样呀？";
+            } else if (sh < 18) {               // 下午
+                lines << "看来昨天很累呢，睡得很早哦";
+            } else {                            // 晚上 18-23：正常睡眠，标出时间
+                lines << "另外，你昨天晚上" + cnHour(sh) + (sm >= 30 ? "点半" : "点")
+                         + "睡觉，很好的习惯哦";
+            }
+        }
+    }
 
     // system uptime
     QString up = uptimeText();
