@@ -47,6 +47,16 @@ ApplicationWindow {
     property string aiGreeting: "你好。"
     property bool userBtnHover: false   // sidebar user-avatar ⌄ hover flag
 
+    // time-of-day greeting under the user avatar (refreshed by greetTimer)
+    function timeGreeting() {
+        var h = new Date().getHours()
+        if (h >= 5 && h < 11) return "早上好，愿你今天幸运伴身。"
+        if (h >= 11 && h < 14) return "中午好，记得按时吃午饭哦。"
+        if (h >= 14 && h < 18) return "下午好，愿你今天一切顺利。"
+        if (h >= 18 && h < 23) return "晚上好，愿你今晚安心入睡。"
+        return "夜深了，早点休息哦。"
+    }
+
     // custom wallpaper (blurred copy from AiService) shown behind the right pane.
     // Layer 1 only — the dark overlay + near-opaque UI sit ABOVE it.
     property string wallpaperUrl: ""
@@ -228,11 +238,14 @@ ApplicationWindow {
                 // ---- top: user avatar + name ----
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 66
+                    Layout.preferredHeight: 92
                     color: "transparent"
                     RowLayout {
-                        anchors.fill: parent
+                        anchors.top: parent.top
+                        anchors.topMargin: 12
+                        anchors.left: parent.left
                         anchors.leftMargin: 18
+                        anchors.right: parent.right
                         anchors.rightMargin: 14
                         spacing: 12
 
@@ -303,6 +316,22 @@ ApplicationWindow {
                         onEntered: root.userBtnHover = true
                         onExited: root.userBtnHover = false
                         onClicked: userMenu.popup(userBtn, 0, userBtn.height + 4)
+                    }
+
+                    // time-of-day greeting: inside the header block, anchored
+                    // to its bottom-left, left-aligned with the avatar
+                    Text {
+                        id: timeGreetText
+                        anchors.left: parent.left
+                        anchors.leftMargin: 18
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 14
+                        text: root.timeGreeting()
+                        color: Theme.navTextDim
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        wrapMode: Text.NoWrap
+                        opacity: 0.85
                     }
                 }
 
@@ -992,6 +1021,13 @@ ApplicationWindow {
     // ================= long-session reminder: nudge to rest after long continuous use =================
     property var appStartTime: Date.now()
     property bool restReminded: false
+
+    // keep the sidebar time-greeting accurate across hour boundaries
+    Timer {
+        interval: 60000
+        repeat: true
+        onTriggered: timeGreetText.text = root.timeGreeting()
+    }
     Timer {
         id: restTimer
         interval: 30 * 60 * 1000   // check every 30 min
