@@ -11,8 +11,6 @@ set(CMAKE_AUTOUIC ON)
 # Qt6 required modules
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Widgets Network Svg QuickControls2 Concurrent)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Wall -Wextra")
-
 # ---- core app sources ----
 set(APP_SOURCES
     src/main.cpp
@@ -82,6 +80,13 @@ qt_add_executable(XiaoQinTools WIN32
     resources/resources.qrc
 )
 
+# per-compiler warnings/optimisation (no global CMAKE_CXX_FLAGS pollution;
+# -Werror intentionally NOT enabled while legacy warnings remain)
+target_compile_options(XiaoQinTools PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-O2>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4;/permissive->
+)
+
 # embed the app icon (cute icon) into the exe
 if(WIN32)
     target_sources(XiaoQinTools PRIVATE resources/app.rc)
@@ -104,6 +109,7 @@ target_link_libraries(XiaoQinTools PRIVATE
     Qt6::Concurrent
     winmm
     dwmapi
+    crypt32
 )
 
 # QML deployment

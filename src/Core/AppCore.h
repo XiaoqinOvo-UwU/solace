@@ -4,7 +4,8 @@
 #include <QStringList>
 
 // AppCore is the single bridge between QML and C++ business logic.
-// It owns the services and exposes a clean API surface to QML.
+// Services are created and injected in main.cpp; AppCore exposes a clean
+// QML-facing API surface and keeps cross-service state (status, toasts...).
 class AppCore : public QObject
 {
     Q_OBJECT

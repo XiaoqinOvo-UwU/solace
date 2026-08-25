@@ -7,11 +7,80 @@
 #include <QProcessEnvironment>
 #include <QCoreApplication>
 #include <QSettings>
+#include <QByteArray>
+#include <QTimer>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <wincrypt.h>
+#endif
+
+namespace {
+const QLatin1String kDpapiPrefix("dpapi:v1:");
+}
 
 ConfigService &ConfigService::instance()
 {
     static ConfigService inst;
     return inst;
+}
+
+// ---- DPAPI secret helpers ----
+QString ConfigService::encryptSecret(const QString &plain)
+{
+#ifdef Q_OS_WIN
+    if (plain.isEmpty()) return plain;
+    QByteArray in = plain.toUtf8();
+    DATA_BLOB inBlob, outBlob;
+    inBlob.pbData = reinterpret_cast<BYTE *>(const_cast<char *>(in.constData()));
+    inBlob.cbData = static_cast<DWORD>(in.size());
+    outBlob.pbData = nullptr;
+    outBlob.cbData = 0;
+    if (CryptProtectData(&inBlob, L"XiaoQinToolsApiKey", nullptr, nullptr, nullptr,
+                         CRYPTPROTECT_UI_FORBIDDEN, &outBlob)) {
+        QByteArray cipher(reinterpret_cast<const char *>(outBlob.pbData),
+                          static_cast<int>(outBlob.cbData));
+        LocalFree(outBlob.pbData);
+        return kDpapiPrefix + QString::fromLatin1(cipher.toBase64());
+    }
+    // DPAPI failure: NEVER fall back to writing plaintext to disk. Return empty
+    // so the field persists as "" (fail-closed); the in-memory value stays
+    // usable for this session and the next save retries encryption.
+    qWarning("DPAPI CryptProtectData failed (error %lu) - secret not persisted",
+             static_cast<unsigned long>(GetLastError()));
+    return QString();
+#else
+    return plain;
+#endif
+}
+
+QString ConfigService::decryptSecret(const QString &stored)
+{
+    if (stored.isEmpty()) return stored;
+    if (!stored.startsWith(kDpapiPrefix)) return stored; // legacy plaintext
+#ifdef Q_OS_WIN
+    QByteArray cipher = QByteArray::fromBase64(stored.mid(kDpapiPrefix.size()).toLatin1());
+    DATA_BLOB inBlob, outBlob;
+    inBlob.pbData = reinterpret_cast<BYTE *>(cipher.data());
+    inBlob.cbData = static_cast<DWORD>(cipher.size());
+    outBlob.pbData = nullptr;
+    outBlob.cbData = 0;
+    if (CryptUnprotectData(&inBlob, nullptr, nullptr, nullptr, nullptr,
+                           CRYPTPROTECT_UI_FORBIDDEN, &outBlob)) {
+        QByteArray plain(reinterpret_cast<const char *>(outBlob.pbData),
+                         static_cast<int>(outBlob.cbData));
+        LocalFree(outBlob.pbData);
+        return QString::fromUtf8(plain);
+    }
+    // Decrypt failed (e.g. different user profile). Return EMPTY — never hand
+    // the ciphertext back as a usable key: a non-empty "dpapi:v1:..." value
+    // would bypass callers' empty-guards and leak the blob to the network.
+    qWarning("DPAPI CryptUnprotectData failed (error %lu) - secret unavailable",
+             static_cast<unsigned long>(GetLastError()));
+    return QString();
+#else
+    return stored;
+#endif
 }
 
 QString ConfigService::configDir() const
@@ -37,11 +106,17 @@ void ConfigService::load()
     QJsonObject o = doc.object();
     if (o.contains("base_url")) m_baseUrl = o.value("base_url").toString();
     if (o.contains("model")) m_model = o.value("model").toString();
-    if (o.contains("api_key")) m_apiKey = o.value("api_key").toString();
-    if (o.contains("api_keys")) m_apiKeys = o.value("api_keys").toObject();
+    if (o.contains("api_key")) m_apiKey = decryptSecret(o.value("api_key").toString());
+    if (o.contains("api_keys")) {
+        QJsonObject raw = o.value("api_keys").toObject();
+        QJsonObject dec;
+        for (auto it = raw.begin(); it != raw.end(); ++it)
+            dec.insert(it.key(), decryptSecret(it.value().toString()));
+        m_apiKeys = dec;
+    }
     if (o.contains("custom_base_url")) m_customBaseUrl = o.value("custom_base_url").toString();
     if (o.contains("custom_model")) m_customModel = o.value("custom_model").toString();
-    if (o.contains("custom_api_key")) m_customApiKey = o.value("custom_api_key").toString();
+    if (o.contains("custom_api_key")) m_customApiKey = decryptSecret(o.value("custom_api_key").toString());
     if (o.contains("clash_path")) m_clashPath = o.value("clash_path").toString();
     if (o.contains("v2ray_path")) m_v2rayPath = o.value("v2ray_path").toString();
     if (o.contains("user_name")) m_userName = o.value("user_name").toString();
@@ -64,11 +139,16 @@ void ConfigService::save()
     QJsonObject o;
     o.insert("base_url", m_baseUrl);
     o.insert("model", m_model);
-    o.insert("api_key", m_apiKey);
-    o.insert("api_keys", m_apiKeys);
+    o.insert("api_key", encryptSecret(m_apiKey));
+    {
+        QJsonObject encKeys;
+        for (auto it = m_apiKeys.begin(); it != m_apiKeys.end(); ++it)
+            encKeys.insert(it.key(), encryptSecret(it.value().toString()));
+        o.insert("api_keys", encKeys);
+    }
     o.insert("custom_base_url", m_customBaseUrl);
     o.insert("custom_model", m_customModel);
-    o.insert("custom_api_key", m_customApiKey);
+    o.insert("custom_api_key", encryptSecret(m_customApiKey));
     o.insert("clash_path", m_clashPath);
     o.insert("v2ray_path", m_v2rayPath);
     o.insert("user_name", m_userName);
@@ -87,6 +167,32 @@ void ConfigService::save()
     if (!f.open(QIODevice::WriteOnly)) return;
     f.write(QJsonDocument(o).toJson());
     f.close();
+}
+
+// ---- debounced persistence (setters are called from the main thread) ----
+void ConfigService::scheduleSave()
+{
+    m_dirty = true;
+    if (!m_saveTimer) {
+        m_saveTimer = new QTimer();
+        m_saveTimer->setSingleShot(true);
+        m_saveTimer->setInterval(250);
+        QObject::connect(m_saveTimer, &QTimer::timeout, [this]() {
+            if (!m_dirty) return;
+            m_dirty = false;
+            save();
+        });
+    }
+    if (!m_saveTimer->isActive()) m_saveTimer->start();
+}
+
+void ConfigService::flush()
+{
+    if (m_saveTimer && m_saveTimer->isActive()) m_saveTimer->stop();
+    if (m_dirty) {
+        m_dirty = false;
+        save();
+    }
 }
 
 QString ConfigService::detectClashExe() const

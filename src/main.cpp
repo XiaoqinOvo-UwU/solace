@@ -52,17 +52,8 @@ int main(int argc, char *argv[])
     // Fusion style honors the dark palette set from QML -> dark TextFields/Groups.
     QQuickStyle::setStyle("Fusion");
 
-    // register C++ services as QML types
-    qmlRegisterType<ProxyService>("XiaoQin.Services", 1, 0, "ProxyService");
-    qmlRegisterType<NetworkService>("XiaoQin.Services", 1, 0, "NetworkService");
-    qmlRegisterType<SystemService>("XiaoQin.Services", 1, 0, "SystemService");
-    qmlRegisterType<MoodService>("XiaoQin.Services", 1, 0, "MoodService");
-    qmlRegisterType<UpdateService>("XiaoQin.Services", 1, 0, "UpdateService");
-    qmlRegisterType<SyncService>("XiaoQin.Services", 1, 0, "SyncService");
-    qmlRegisterType<PluginManager>("XiaoQin.Services", 1, 0, "PluginManager");
-    qmlRegisterType<AiService>("XiaoQin.Services", 1, 0, "AiService");
-    qmlRegisterType<StatsService>("XiaoQin.Services", 1, 0, "StatsService");
-    qmlRegisterType<ContactService>("XiaoQin.Services", 1, 0, "ContactService");
+    // NOTE: services are injected as root context properties below — QML never
+    // instantiates them as components, so no qmlRegisterType calls are needed.
 
     QQmlApplicationEngine engine;
     // Make QML modules resolvable next to the executable (deployed Qt plugins).
@@ -108,6 +99,8 @@ int main(int argc, char *argv[])
     QObject::connect(&app, &QCoreApplication::aboutToQuit, aiSvc, [aiSvc]() {
         aiSvc->recordSessionEnd();
         aiSvc->stopActivityMonitor();
+        // flush any debounced config write so the last edit is not lost
+        ConfigService::instance().flush();
     });
     return app.exec();
 }

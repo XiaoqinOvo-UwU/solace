@@ -14,7 +14,8 @@ AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\XiaoQinTools
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=C:\XiaoQinTools\installer
+; output into the script directory (repo-local, no hardcoded machine paths)
+OutputDir=.
 OutputBaseFilename=XiaoQinTools-{#MyAppVersion}-setup
 Compression=lzma2
 SolidCompression=yes
@@ -23,7 +24,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; 强制覆盖旧的重复安装（同 AppId 自动升级）
 UsePreviousAppDir=no
-; 安装后可卸载，但保留 %APPDATA% 数据
+; 安装后可卸载，但默认保留 %APPDATA% 数据（可在卸载时勾选删除）
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
@@ -34,7 +35,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Name: "startup"; Description: "开机自启动"; GroupDescription: "附加任务:"; Flags: unchecked
 
 [Files]
-Source: "C:\XiaoQinTools\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -45,7 +46,8 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall
 
 [Code]
-// 清理旧副本：删除其他位置残留的 XiaoQinTools 安装（跳过正式安装目录）
+// 清理旧副本：仅允许删除 {autopf}（Program Files）下与本应用关联的目录。
+// 绝不动用户桌面 / 文档 / 其他 shell 文件夹（防止误删用户同名个人文件夹）。
 procedure CleanupStrayCopies();
 var
   appDir: String;
@@ -57,15 +59,10 @@ begin
 
   cands := TStringList.Create;
   try
-    // 已知的旧副本候选位置（深度 1-2）
-    cands.Add(ExpandConstant('{userdesktop}') + '\xiaoqintools-test');
-    cands.Add(ExpandConstant('{userdesktop}') + '\XiaoQinTools');
-    cands.Add(ExpandConstant('{userdesktop}') + '\小钦的工具');
-    cands.Add(ExpandConstant('{userdocs}') + '\xiaoqintools-test');
-    cands.Add(ExpandConstant('{userdocs}') + '\XiaoQinTools');
-    cands.Add('C:\XiaoQinTools\dist_old');
-    cands.Add('C:\XiaoQinTools\test-311');
-    cands.Add('C:\XiaoQinTools\zip-install');
+    // 只列 {autopf} 下的旧安装目录候选
+    cands.Add(ExpandConstant('{autopf}') + '\XiaoQinTools');
+    cands.Add(ExpandConstant('{autopf}') + '\XiaoQinTools_test');
+    cands.Add(ExpandConstant('{autopf}') + '\xiaoqintools');
 
     for i := 0 to cands.Count - 1 do begin
       subDir := cands[i];
@@ -87,4 +84,18 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     CleanupStrayCopies();
+end;
+
+// ---- uninstall: optional "delete user data" confirmation (safe default: No) ----
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then begin
+    // opt-in only: default is to KEEP %APPDATA% data. Deleting requires an
+    // explicit Yes on the confirmation prompt.
+    if MsgBox('是否同时删除用户数据与配置？' + Chr(13) + Chr(10) + Chr(13) + Chr(10) +
+              ExpandConstant('{userappdata}\XiaoQinTools') +
+              Chr(13) + Chr(10) + Chr(13) + Chr(10) + '包含 API 配置、记忆等个人数据，删除后不可恢复。',
+              mbConfirmation, MB_YESNO) = IDYES then
+      DelTree(ExpandConstant('{userappdata}\XiaoQinTools'), True, True, True);
+  end;
 end;

@@ -307,7 +307,7 @@ Page {
                         height: 44
                         radius: 22
                         color: mouse.hovered ? Qt.rgba(255/255,180/255,210/255,0.25) : Qt.rgba(255/255,180/255,210/255,0.10)
-                        border.color: Qt.rgba(255,200,225,0.25)
+                        border.color: Qt.rgba(255/255, 200/255, 225/255, 0.25)
                         border.width: 1
                         Text {
                             anchors.centerIn: parent
