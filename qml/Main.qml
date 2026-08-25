@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQuick.LocalStorage
+import QtQuick.Effects
 import "Pages"
 import "Components"
 
@@ -57,10 +58,31 @@ ApplicationWindow {
         return "夜深了，早点休息哦。"
     }
 
-    // custom wallpaper (blurred copy from AiService) shown behind the right pane.
-    // Layer 1 only — the dark overlay + near-opaque UI sit ABOVE it.
+    // custom wallpaper (ORIGINAL image — frosted glass is live GPU blur)
+    // shown behind the right pane. Layer 1 only — overlays + near-opaque UI sit ABOVE it.
     property string wallpaperUrl: ""
-    property real wallpaperBrightness: 0.5    // 0..1 avg luminance, drives the dark overlay
+    property real wallpaperBrightness: 0.5    // 0..1 avg luminance, drives the adaptive scrim
+
+    // ---- live glass mapping (blur strength -> MultiEffect) ----
+    // MultiEffect.blur is NORMALIZED 0..1 (radius px = blur × blurMax):
+    // slider r -> r/64 of blurMax(64) -> r pixels of real blur.
+    // (Verified against Qt docs: blur 0..1, blurMax = pixel radius at blur 1.0.
+    //  Feeding raw px (1,3) overflowed the range -> full fog / black.)
+    property real wallBlurRadiusPx: 0
+    // ±0.08 brightness compensation: dark wallpaper lifted, bright wallpaper pressed.
+    // MultiEffect.brightness is an ABSOLUTE value (0=black, 1.0=unchanged, 2=max).
+    readonly property real wallBlurBrightness: qBound(-0.08, (0.5 - root.wallpaperBrightness) * 0.16, 0.08)
+    // wallpaper layer opacity: glass mode respects the persisted
+    // wallpaper_glass_opacity (0.05..0.20, default 0.10 — the ambient look
+    // users tuned since 4.1.0; 0.60 hardcode was the "overexposure" bug).
+    // Dark mode stays 20% ambient. Dynamic so appearance switches never flash.
+    property real wallGlassOpacity: 0.10
+    readonly property real glassTargetOpacity: Theme.glassMode ? root.wallGlassOpacity : 0.20
+
+    function refreshBlurStrength() {
+        if (!aiService.wallpaperBlurEnabled()) { root.wallBlurRadiusPx = 0; return }
+        root.wallBlurRadiusPx = aiService.wallpaperBlurRadius()
+    }
     function refreshWallpaper() {
         var oldUrl = root.wallpaperUrl
         root.wallpaperUrl = aiService.wallpaperPath()
@@ -75,6 +97,8 @@ ApplicationWindow {
             wpCrossfade.start()
         } else if (oldUrl.length === 0 && root.wallpaperUrl.length > 0) {
             wpBack.source = root.wallpaperUrl   // first set: just show
+        } else if (root.wallpaperUrl.length === 0) {
+            wpBack.source = ""                  // wallpaper removed
         }
     }
     // sync the persisted appearance mode into the Theme singleton so every
@@ -82,10 +106,12 @@ ApplicationWindow {
     function syncAppearance() {
         Theme.appearanceMode = aiService.appearanceMode()
         Theme.glassOpacity = aiService.wallpaperGlassOpacity()
+        root.wallGlassOpacity = aiService.wallpaperGlassOpacity()
     }
     Connections {
         target: aiService
         function onWallpaperChanged() { root.refreshWallpaper() }
+        function onWallpaperBlurChanged() { root.refreshBlurStrength() }
     }
 
     // contact list model (id|name|hasAvatar)
@@ -608,24 +634,29 @@ ApplicationWindow {
             color: "transparent"
 
             // ================= LAYER 1: WALLPAPER BACKGROUND =================
-            // Only this layer shows the wallpaper. 300ms crossfade on change.
+            // Real-time GPU frosted glass: the ORIGINAL image is blurred live
+            // by MultiEffect (QtQuick.Effects) — no pre-blurred PNG copy, no
+            // disk writes, no regeneration. The 300ms crossfade still applies.
             Item {
+                id: wallStack
                 anchors.fill: parent
-                visible: root.wallpaperUrl.length > 0
+                // rendered ONLY via wallGrab -> MultiEffect (single pass).
+                // Never shown directly: the effect would stack on top of it.
+                visible: false
                 Image {
                     id: wpBack
                     anchors.fill: parent
                     source: root.wallpaperUrl
+                    sourceSize: Qt.size(Math.ceil(root.width), Math.ceil(root.height))
                     fillMode: Image.PreserveAspectCrop
                     smooth: true
                     mipmap: true
-                    // 默认深色: 20% ambient; 玻璃模式: 60% wallpaper opacity
-                    opacity: Theme.glassMode ? 0.60 : 0.20
                 }
                 Image {
                     id: wpFront
                     anchors.fill: parent
                     source: ""
+                    sourceSize: Qt.size(Math.ceil(root.width), Math.ceil(root.height))
                     fillMode: Image.PreserveAspectCrop
                     smooth: true
                     mipmap: true
@@ -633,27 +664,65 @@ ApplicationWindow {
                 }
                 SequentialAnimation {
                     id: wpCrossfade
-                    NumberAnimation { target: wpFront; property: "opacity"; from: 0; to: 0.20; duration: 300; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: wpFront; property: "opacity"; from: 0; to: 1.0; duration: 300; easing.type: Easing.OutCubic }
                     ScriptAction { script: { wpBack.source = wpFront.source; wpFront.source = ""; wpFront.opacity = 0 } }
                 }
             }
 
-            // ================= LAYER 2: OVERLAY =================
+            // bridge: captures the (hidden) wallpaper stack into a texture —
+            // the documented way to sample invisible items. Live so the
+            // crossfade and appearance switches flow through. The grab texture
+            // is FULLY OPAQUE: MultiEffect outputs it without the source's
+            // alpha, so the wallpaper's final opacity (20%/60%) must live on
+            // the effect item itself — otherwise the wallpaper doubles up and
+            // blows out.
+            ShaderEffectSource {
+                id: wallGrab
+                anchors.fill: parent
+                sourceItem: wallStack
+                visible: false
+                live: true
+                smooth: true
+                textureSize: Qt.size(Math.ceil(root.width), Math.ceil(root.height))
+            }
+
+            // live gaussian blur over the grabbed wallpaper (single GPU pass).
+            // blur (0..1 normalized) = slider r / blurMax(64) -> r px radius.
+            // 0 when 模糊背景 is off. MultiEffect runs on every RHI backend
+            // (D3D11/OpenGL/Metal/Vulkan) — no GraphicsInfo gating needed.
+            MultiEffect {
+                anchors.fill: parent
+                visible: root.wallpaperUrl.length > 0
+                opacity: root.glassTargetOpacity   // 0.20 dark / config glass — applied HERE, not inside the grab
+                source: wallGrab
+                blurEnabled: root.wallBlurRadiusPx > 0
+                blurMax: 64
+                blur: qBound(0.0, root.wallBlurRadiusPx / 64.0, 1.0)
+                saturation: 1.15                    // compensation for the overlay grey-out
+                brightness: 1.0 + root.wallBlurBrightness  // ±0.08 by wallpaper luminance
+            }
+
+// ================= LAYER 2: OVERLAY =================
             // Dark mode: dark overlay adapting to wallpaper brightness.
-            // Glass mode: 10% black press-down (压暗).
+            // Glass mode: brightness-adaptive black scrim (dark wallpaper barely
+            // dimmed, bright wallpaper pressed up to glassScrimMax) so white
+            // text stays readable on bright wallpapers.
             Rectangle {
                 anchors.fill: parent
                 color: root.wallpaperUrl.length > 0
                      ? Qt.rgba(0, 0, 0, Theme.glassMode
-                                          ? 0.10
-                                          : 0.45 + 0.20 * root.wallpaperBrightness)
+                                           ? qBound(Theme.glassScrimMin,
+                                                    Theme.glassScrimMin + Math.max(0, root.wallpaperBrightness - 0.55) * Theme.glassScrimK,
+                                                    Theme.glassScrimMax)
+                                           : 0.45 + 0.20 * root.wallpaperBrightness)
                      : "transparent"
             }
-            // glass mode: 30% dark-blue wash (深蓝色) over the wallpaper
+            // glass mode: environment tint from the wallpaper itself (≤8%),
+            // never a hardcoded blue wash
             Rectangle {
                 anchors.fill: parent
                 visible: Theme.glassMode && root.wallpaperUrl.length > 0
-                color: Qt.rgba(10/255, 20/255, 60/255, 0.30)
+                color: Qt.rgba(Theme.wallpaperTint.r, Theme.wallpaperTint.g, Theme.wallpaperTint.b, Theme.glassTintAlpha)
             }
 
             // subtle vignette: darken the extreme top/bottom edges so cards and
@@ -662,10 +731,10 @@ ApplicationWindow {
                 anchors.fill: parent
                 visible: root.wallpaperUrl.length > 0
                 gradient: Gradient {
-                    GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.30) }
+                    GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, Theme.vignetteAlpha) }
                     GradientStop { position: 0.20; color: Qt.rgba(0, 0, 0, 0.0) }
                     GradientStop { position: 0.80; color: Qt.rgba(0, 0, 0, 0.0) }
-                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.30) }
+                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, Theme.vignetteAlpha) }
                 }
             }
 

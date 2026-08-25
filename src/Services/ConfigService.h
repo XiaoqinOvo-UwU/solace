@@ -67,7 +67,7 @@ public:
     QString appearanceMode() const { return m_appearanceMode; }
     double  wallpaperGlassOpacity() const { return m_wallpaperGlassOpacity; }
     void setAppearanceMode(const QString &v) { m_appearanceMode = v; scheduleSave(); }
-    void setWallpaperGlassOpacity(double v) { m_wallpaperGlassOpacity = qBound(0.05, v, 0.20); scheduleSave(); }
+    void setWallpaperGlassOpacity(double v) { m_wallpaperGlassOpacity = qBound(0.05, v, 0.40); scheduleSave(); }
 
     void setBaseUrl(const QString &v) { m_baseUrl = v; scheduleSave(); }
     void setModel(const QString &v) { m_model = v; scheduleSave(); }
@@ -111,7 +111,7 @@ private:
     bool m_allowTimeRecord = true;
     bool m_allowLongTermMemory = true;
     bool m_wallpaperBlurEnabled = true;
-    int  m_wallpaperBlurRadius = 12;   // subtle frosted by default
+    int  m_wallpaperBlurRadius = 24;   // blur strength % (0..40 -> MultiEffect 0.25..1.0)
     double m_wallpaperBrightness = 0.5;
     QString m_appearanceMode;          // "" | "glass"
     double m_wallpaperGlassOpacity = 0.10; // wallpaper layer opacity in glass mode

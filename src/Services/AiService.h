@@ -109,9 +109,9 @@ public:
     Q_INVOKABLE QString setWallpaperPreset(int index);    // built-in dark gradient (0..3)
     Q_INVOKABLE void removeWallpaper();
     Q_INVOKABLE bool wallpaperBlurEnabled();
-    Q_INVOKABLE void setWallpaperBlurEnabled(bool v);     // regenerates the blurred copy
+    Q_INVOKABLE void setWallpaperBlurEnabled(bool v);     // emits wallpaperBlurChanged() — live GPU blur
     Q_INVOKABLE int wallpaperBlurRadius();
-    Q_INVOKABLE void setWallpaperBlurRadius(int r);       // 0..40, regenerates the blurred copy
+    Q_INVOKABLE void setWallpaperBlurRadius(int r);       // 0..40 blur strength (QML MultiEffect mapping)
     Q_INVOKABLE double wallpaperBrightness();             // 0..1 average luminance (drives dark overlay)
     Q_INVOKABLE QString wallpaperTintColor();             // "#rrggbb" average colour — glass-mode environment tint
 
@@ -184,6 +184,7 @@ signals:
     void emotionSignal(QString emotion, qreal intensity); // AIRI-style ACT token playback
     void profileChanged();                               // name/avatar/persona changed -> refresh UI
     void wallpaperChanged();                             // custom wallpaper set/removed -> refresh backdrop
+    void wallpaperBlurChanged();                         // blur strength/enabled changed -> QML updates live
     void doNotDisturbChanged();                          // DND state changed (UI may show a badge)
 
 private:
@@ -243,11 +244,7 @@ private:
     void updateConversationState(const QString &userText, const QString &aiReply, const QString &emotion);
     QString conversationStateBlock() const;  // prompt-ready state section
 
-    // v3.9: conflict resolution + importance-gated memory write
+// v3.9: conflict resolution + importance-gated memory write
     void runConflictResolution(const QString &userText, const QString &memJson);
     void bumpRecalledUsage(const QString &userMsg, const QString &topic);
-
-    void regenerateWallpaper();      // re-blur wallpaper.png at the current radius
-    void applyWallpaperBlur();       // debounced regenerate + notify (main thread)
-    QTimer *m_wallpaperDebounce = nullptr;
 };

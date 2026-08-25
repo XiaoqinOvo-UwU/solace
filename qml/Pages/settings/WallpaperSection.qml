@@ -185,7 +185,7 @@ SettingsSectionCard {
         visible: wpBlurSwitch.checked
         spacing: 10
         Text {
-            text: "模糊程度"
+            text: "模糊强度"
             color: Theme.text
             font.pixelSize: 13
         }

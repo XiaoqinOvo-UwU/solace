@@ -112,6 +112,17 @@ QtObject {
     property color wallpaperTint: "#FFFFFF"
     readonly property bool glassMode: appearanceMode === "glass"
 
+    // ---- glass overlay tokens (Layer 2) ----
+    // brightness-adaptive black scrim: dark wallpaper barely dimmed, bright
+    // wallpaper pressed up to glassScrimMax so white text stays readable
+    readonly property real glassScrimMin: 0.06
+    readonly property real glassScrimK:  0.55
+    readonly property real glassScrimMax: 0.38
+    // environment tint from the wallpaper itself (≤8%, never a blue wash)
+    readonly property real glassTintAlpha: 0.08
+    // top/bottom vignette strength (dark desktop depth, capped at 0.22)
+    readonly property real vignetteAlpha: 0.15
+
     // ---- cards: glass strongly tinted by the wallpaper colour (45% tint +
     // 20% grey + 35% white) so a blue wallpaper gives blue glass, yet greyed
     // enough for WHITE text to stay readable. Alphas reduced ~25% (更透明).

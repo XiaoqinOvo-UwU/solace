@@ -1123,120 +1123,31 @@ QString AiService::userAvatarPath()
     return "file:///" + p.replace('\\', '/') + "#" + QString::number(m);
 }
 
-// ---- custom wallpaper (blurred copy behind the right content pane) ----
-// two-pass box blur (approx Gaussian) — cheap, no extra Qt modules.
-static QImage boxBlur(const QImage &src, int radius)
-{
-    if (src.isNull()) return src;
-    const int r = qMax(1, radius);
-    const int div = 2 * r + 1;
-    QImage in = src.convertToFormat(QImage::Format_RGB32);
-    QImage out = in.copy();
-    const int w = in.width(), h = in.height();
-
-    // horizontal pass
-    for (int y = 0; y < h; ++y) {
-        QRgb *line = (QRgb *)in.scanLine(y);
-        QRgb *dst = (QRgb *)out.scanLine(y);
-        int rr = 0, gg = 0, bb = 0;
-        for (int x = -r; x <= r; ++x) {
-            const QRgb p = line[qBound(0, x, w - 1)];
-            rr += qRed(p); gg += qGreen(p); bb += qBlue(p);
-        }
-        for (int x = 0; x < w; ++x) {
-            dst[x] = qRgb(rr / div, gg / div, bb / div);
-            const QRgb pm = line[qBound(0, x - r, w - 1)];
-            const QRgb pp = line[qBound(0, x + r + 1, w - 1)];
-            rr += qRed(pp) - qRed(pm); gg += qGreen(pp) - qGreen(pm); bb += qBlue(pp) - qBlue(pm);
-        }
-    }
-    in = out;
-
-    // vertical pass
-    for (int x = 0; x < w; ++x) {
-        int rr = 0, gg = 0, bb = 0;
-        for (int y = -r; y <= r; ++y) {
-            const QRgb p = in.pixel(qBound(0, x, w - 1), qBound(0, y, h - 1));
-            rr += qRed(p); gg += qGreen(p); bb += qBlue(p);
-        }
-        for (int y = 0; y < h; ++y) {
-            out.setPixel(x, y, qRgb(rr / div, gg / div, bb / div));
-            const QRgb pm = in.pixel(x, qBound(0, y - r, h - 1));
-            const QRgb pp = in.pixel(x, qBound(0, y + r + 1, h - 1));
-            rr += qRed(pp) - qRed(pm); gg += qGreen(pp) - qGreen(pm); bb += qBlue(pp) - qBlue(pm);
-        }
-    }
-    return out;
-}
-
 QString AiService::wallpaperPath()
 {
     const QString dir = ConfigService::instance().configDir();
     const QString sharp = dir + "/wallpaper.png";
     if (!QFile::exists(sharp)) return QString();
-    QString f;
-    // frosted-glass blur now happens in QML (GlassMaterial FastBlur); the
-    // C++ copy is only used when the user explicitly enables 模糊背景.
-    if (ConfigService::instance().wallpaperBlurEnabled()) {
-        const QString blurred = dir + "/wallpaper_blur.png";
-        if (QFile::exists(blurred)) f = blurred;
-    }
-    if (f.isEmpty()) f = sharp;
-    // cache-buster fragment: Qt Image treats a changed URL as a new image and
-    // reloads the file — this is how a regenerated blur reaches the UI.
-    const qint64 stamp = QFileInfo(f).lastModified().toMSecsSinceEpoch();
-    return "file:///" + f.replace('\\', '/') + "#" + QString::number(stamp);
-}
-
-void AiService::regenerateWallpaper()
-{
-    const QString dir = ConfigService::instance().configDir();
-    const QString sharp = dir + "/wallpaper.png";
-    if (!QFile::exists(sharp)) return;
-    QImage img(sharp);
-    if (img.isNull()) return;
-    // downscale for the blur pass: keep it close to the display size (1080) so
-    // the result stays sharp-ish; a small image keeps the blur instant so
-    // dragging the slider never janks.
-    const int maxSide = 1080;
-    if (qMax(img.width(), img.height()) > maxSide)
-        img = img.scaled(maxSide, maxSide, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    const int r = ConfigService::instance().wallpaperBlurRadius();
-    QImage blurred = r > 0 ? boxBlur(img, r) : img;
-    QFile::remove(dir + "/wallpaper_blur.png");
-    blurred.save(dir + "/wallpaper_blur.png", "PNG");
-}
-
-// debounced: batch rapid slider changes into one regeneration
-void AiService::applyWallpaperBlur()
-{
-    regenerateWallpaper();
-    emit wallpaperChanged();
+    // The frosted-glass effect is real-time GPU blur (QtQuick.Effects
+    // MultiEffect) over this ORIGINAL image — no pre-blurred PNG copy exists.
+    // The cache-buster fragment makes Image reload the file after a
+    // wallpaper replacement even if the path string is unchanged.
+    const qint64 stamp = QFileInfo(sharp).lastModified().toMSecsSinceEpoch();
+    QString p = sharp;
+    return "file:///" + p.replace('\\', '/') + "#" + QString::number(stamp);
 }
 
 bool AiService::wallpaperBlurEnabled() { return ConfigService::instance().wallpaperBlurEnabled(); }
 void AiService::setWallpaperBlurEnabled(bool v)
 {
     ConfigService::instance().setWallpaperBlurEnabled(v);
-    if (!m_wallpaperDebounce) {
-        m_wallpaperDebounce = new QTimer(this);
-        m_wallpaperDebounce->setSingleShot(true);
-        m_wallpaperDebounce->setInterval(120);
-        connect(m_wallpaperDebounce, &QTimer::timeout, this, &AiService::applyWallpaperBlur);
-    }
-    m_wallpaperDebounce->start();
+    emit wallpaperBlurChanged();
 }
 int AiService::wallpaperBlurRadius() { return ConfigService::instance().wallpaperBlurRadius(); }
 void AiService::setWallpaperBlurRadius(int r)
 {
     ConfigService::instance().setWallpaperBlurRadius(r);
-    if (!m_wallpaperDebounce) {
-        m_wallpaperDebounce = new QTimer(this);
-        m_wallpaperDebounce->setSingleShot(true);
-        m_wallpaperDebounce->setInterval(120);
-        connect(m_wallpaperDebounce, &QTimer::timeout, this, &AiService::applyWallpaperBlur);
-    }
-    m_wallpaperDebounce->start();
+    emit wallpaperBlurChanged();
 }
 
 double AiService::wallpaperBrightness()
@@ -1275,7 +1186,6 @@ QString AiService::setWallpaper(const QString &srcPath)
     const bool ok = img.save(dir + "/wallpaper.png", "PNG");
     if (ok) {
         ConfigService::instance().setWallpaperBrightness(averageLuminance(img));
-        regenerateWallpaper();
         emit wallpaperChanged();
     }
     return wallpaperPath();
@@ -1301,7 +1211,6 @@ QString AiService::setWallpaperPreset(int index)
     QDir().mkpath(dir);
     if (img.save(dir + "/wallpaper.png", "PNG")) {
         ConfigService::instance().setWallpaperBrightness(averageLuminance(img));
-        regenerateWallpaper();
         emit wallpaperChanged();
     }
     return wallpaperPath();
