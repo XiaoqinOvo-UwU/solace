@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import "../../Components"
 
 // AI 配置：OpenAI-compatible endpoint (base url / model / key) + quick presets.
@@ -16,6 +18,7 @@ SettingsSectionCard {
     title: "AI 配置"
 
     property var modelList: []
+    property bool detecting: false
 
     Text {
         Layout.fillWidth: true
@@ -43,9 +46,11 @@ SettingsSectionCard {
             text: aiService.apiModel()
         }
         AppButton {
-            text: "检测模型"
+            id: detectButton
+            text: section.detecting ? "检测中…" : "检测模型"
             variant: "ghost"
             implicitHeight: 36
+            enabled: !section.detecting
             onClicked: section.detectModels()
         }
         AppButton {
@@ -57,16 +62,42 @@ SettingsSectionCard {
         }
     }
 
-    // dropdown of detected models — same dark visual language as the inputs
+    // dropdown of detected models — themed to match the inputs in every
+    // appearance mode (Fusion's default Menu is a white popup that clashes
+    // with both the dark theme and white glass). Scoped Basic import: this
+    // file customizes Menu, so it selects the Basic style for Menu/MenuItem
+    // only; AppButton/ThemedTextField keep their own custom implementations.
     Menu {
         id: modelMenu
         y: -8
         width: Math.max(200, editModel.width)
+        property int hoveredMenuIndex: -1
+        background: Rectangle {
+            color: Theme.glassMode ? Qt.rgba(0.12, 0.12, 0.14, 0.96) : Theme.surface
+            radius: 8
+            border.color: Theme.glassBorder
+            border.width: 1
+        }
         Instantiator {
             model: section.modelList
             delegate: MenuItem {
-                text: modelData
                 height: 34
+                leftPadding: 12
+                contentItem: Text {
+                    text: modelData
+                    color: Theme.text
+                    font.pixelSize: Theme.fsDefault
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                }
+                background: Rectangle {
+                    radius: 6
+                    color: modelMenu.hoveredMenuIndex === index ? Theme.glassHover : "transparent"
+                }
+                HoverHandler {
+                    cursorShape: Qt.PointingHandCursor
+                    onHoveredChanged: modelMenu.hoveredMenuIndex = hovered ? index : -1
+                }
                 onTriggered: {
                     editModel.text = modelData
                     section.saveConfig()   // apply immediately, like presets
@@ -93,6 +124,7 @@ SettingsSectionCard {
             appCore.showToast("请先填写 Base URL 和 API Key")
             return
         }
+        section.detecting = true
         appCore.showToast("正在检测可用模型…")
         detectTimer.restart()
     }
@@ -105,6 +137,7 @@ SettingsSectionCard {
             var key = editApiKey.text.trim()
             var list = aiService.fetchAvailableModels(url, key)
             section.modelList = list
+            section.detecting = false
             if (list.length === 0) {
                 appCore.showToast("未检测到模型（接口可能不支持 /models），可手动输入模型名")
                 return

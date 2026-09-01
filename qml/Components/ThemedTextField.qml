@@ -12,5 +12,11 @@ TextField {
     color: Theme.text
     placeholderTextColor: Theme.textDim
     selectByMouse: true
-    background: Rectangle { color: Theme.inputBg; radius: 8 }
+    background: Rectangle {
+        radius: 8
+        color: Theme.inputBg
+        border.width: 1
+        border.color: field.activeFocus ? Theme.inputFocusBorder : Theme.inputBorder
+        Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
+    }
 }

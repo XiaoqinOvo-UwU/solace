@@ -181,13 +181,10 @@ Item {
                         onClicked: aiProfileDialog.showOverview()
                     }
                     Text { text: "AI 名字"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
-                    TextField {
+                    ThemedTextField {
                         id: profileAiName
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 38
-                        color: Theme.text
+                        placeholderText: "AI 的名字"
                         text: aiService.aiName()
-                        background: Rectangle { color: Theme.inputBg; radius: Theme.rMd }
                         onAccepted: saveProfileBtn.clicked()
                     }
                     Text { text: "AI 人设"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
@@ -197,6 +194,10 @@ Item {
                         color: Theme.inputBg
                         radius: Theme.rMd
                         clip: true
+                        border.width: 1
+                        // focus ring follows the text area, glass-aware
+                        border.color: profileAiPersonality.activeFocus ? Theme.inputFocusBorder : Theme.inputBorder
+                        Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
                         ScrollView {
                             anchors.fill: parent
                             anchors.margins: Theme.sp2
@@ -214,6 +215,13 @@ Item {
                                 background: null
                             }
                         }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: profileAiPersonality.text.length + " 字"
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.fsCaption
+                        horizontalAlignment: Text.AlignRight
                     }
                     AppButton {
                         id: saveProfileBtn
@@ -243,20 +251,29 @@ Item {
                         implicitWidth: 80
                         onClicked: aiProfileDialog.showOverview()
                     }
-                    ScrollView {
+                    Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        color: Theme.inputBg
+                        radius: Theme.rMd
                         clip: true
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                        TextArea {
-                            id: eventsText
-                            width: parent.width
-                            color: Theme.text
-                            font.pixelSize: Theme.fsDefault
-                            readOnly: true
-                            wrapMode: TextEdit.Wrap
-                            background: null
-                            text: aiService.eventMemoryText(50)
+                        border.width: 1
+                        border.color: Theme.inputBorder
+                        ScrollView {
+                            anchors.fill: parent
+                            anchors.margins: Theme.sp2
+                            clip: true
+                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                            TextArea {
+                                id: eventsText
+                                width: parent.width
+                                color: Theme.text
+                                font.pixelSize: Theme.fsDefault
+                                readOnly: true
+                                wrapMode: TextEdit.Wrap
+                                background: null
+                                text: aiService.eventMemoryText(50)
+                            }
                         }
                     }
                 }
@@ -369,18 +386,22 @@ Item {
                                 }
                             }
                         }
+                        // empty state: guide first-time users
+                        Text {
+                            anchors.centerIn: parent
+                            visible: interestsListView.count === 0
+                            text: "还没有添加兴趣\n和 AI 聊聊你喜欢的事，或在下方添加"
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.fsSmall
+                            horizontalAlignment: Text.AlignHCenter
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: Theme.sp3
-                        TextField {
+                        ThemedTextField {
                             id: interestInput
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 38
-                            color: Theme.text
                             placeholderText: "添加一个兴趣（如 Minecraft）"
-                            placeholderTextColor: Theme.textDim
-                            background: Rectangle { color: Theme.inputBg; radius: Theme.rMd }
                             onAccepted: addInterestBtn.clicked()
                         }
                         AppButton {
@@ -438,18 +459,22 @@ Item {
                                 }
                             }
                         }
+                        // empty state: guide first-time users
+                        Text {
+                            anchors.centerIn: parent
+                            visible: topicsListView.count === 0
+                            text: "没有未完成的话题\n聊到一半被打断的话题会自动出现在这里"
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.fsSmall
+                            horizontalAlignment: Text.AlignHCenter
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: Theme.sp3
-                        TextField {
+                        ThemedTextField {
                             id: topicInput
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 38
-                            color: Theme.text
                             placeholderText: "添加一个聊到一半的话题"
-                            placeholderTextColor: Theme.textDim
-                            background: Rectangle { color: Theme.inputBg; radius: Theme.rMd }
                             onAccepted: addTopicBtn.clicked()
                         }
                         AppButton {
@@ -480,12 +505,17 @@ Item {
                         implicitWidth: 80
                         onClicked: aiProfileDialog.showOverview()
                     }
-                    Card {
+                    Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        color: Theme.inputBg
+                        radius: Theme.rMd
+                        clip: true
+                        border.width: 1
+                        border.color: Theme.inputBorder
                         ScrollView {
                             anchors.fill: parent
-                            anchors.margins: Theme.sp3
+                            anchors.margins: Theme.sp2
                             clip: true
                             ScrollBar.vertical.policy: ScrollBar.AsNeeded
                             TextArea {
@@ -512,16 +542,36 @@ Item {
         dialogSubtitle: "AI 记住的关于你的一切"
         dialogWidth: 560
         dialogHeight: 520
+        property bool editing: false
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: Theme.sp4
             spacing: Theme.sp3
+
+            // edit-mode indicator banner
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 28
+                radius: Theme.rMd
+                color: Theme.glassMode ? Qt.rgba(0.95,0.75,0.3,0.15) : Qt.rgba(0.95,0.75,0.3,0.12)
+                visible: memoryViewDialog.editing
+                Text {
+                    anchors.centerIn: parent
+                    text: "⚠ 编辑模式 — 修改后请点「保存修改」"
+                    color: Theme.glassMode ? "#E6B84C" : "#B8860B"
+                    font.pixelSize: Theme.fsCaption
+                }
+            }
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: Theme.inputBg
                 radius: Theme.rMd
+                clip: true
+                border.width: 1
+                border.color: memoryViewDialog.editing ? Theme.inputFocusBorder : Theme.inputBorder
+                Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
                 ScrollView {
                     anchors.fill: parent
                     anchors.margins: Theme.sp2
@@ -536,7 +586,6 @@ Item {
                         wrapMode: TextEdit.Wrap
                         background: null
                         text: aiService.memoryDetail()
-                        // hint when entering edit mode
                         onReadOnlyChanged: { if (!readOnly) text = aiService.memoryRaw() }
                     }
                 }
@@ -546,28 +595,30 @@ Item {
                 Layout.fillWidth: true
                 spacing: Theme.sp3
                 AppButton {
-                    text: memoryReportText.readOnly ? "编辑原始记忆" : "取消编辑"
+                    text: memoryViewDialog.editing ? "取消编辑" : "编辑原始记忆"
                     variant: "secondary"
                     Layout.fillWidth: true
                     onClicked: {
-                        if (memoryReportText.readOnly) {
-                            // switch to raw JSON for editing
-                            memoryReportText.readOnly = false
-                        } else {
+                        if (memoryViewDialog.editing) {
                             memoryReportText.readOnly = true
                             memoryReportText.text = aiService.memoryDetail()
+                        } else {
+                            memoryReportText.readOnly = false
+                            memoryReportText.text = aiService.memoryRaw()
                         }
+                        memoryViewDialog.editing = !memoryViewDialog.editing
                     }
                 }
                 AppButton {
                     text: "保存修改"
                     variant: "primary"
                     Layout.fillWidth: true
-                    enabled: !memoryReportText.readOnly
+                    enabled: memoryViewDialog.editing
                     onClicked: {
                         aiService.setMemoryRaw(memoryReportText.text)
                         memoryReportText.readOnly = true
                         memoryReportText.text = aiService.memoryDetail()
+                        memoryViewDialog.editing = false
                         dlg.toast("记忆已保存~")
                     }
                 }
@@ -595,7 +646,13 @@ Item {
                 placeholderText: "比如：我喜欢喝奶茶，讨厌下雨天…"
                 placeholderTextColor: Theme.textDim
                 wrapMode: TextEdit.Wrap
-                background: Rectangle { color: Theme.inputBg; radius: Theme.rMd }
+                background: Rectangle {
+                    radius: Theme.rMd
+                    color: Theme.inputBg
+                    border.width: 1
+                    border.color: memoryInput.activeFocus ? Theme.inputFocusBorder : Theme.inputBorder
+                    Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
+                }
             }
             RowLayout {
                 Layout.fillWidth: true

@@ -19,7 +19,8 @@ Dialog {
     modal: true
     padding: 18
     background: Rectangle {
-        color: Theme.cardFill
+        // glass mode: dark frosted at 94% opacity for white-text readability
+        color: Theme.glassMode ? Qt.rgba(0.14, 0.14, 0.16, 0.94) : Theme.cardFill
         radius: 14
         border.color: Theme.glassBorder
         border.width: 1

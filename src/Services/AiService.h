@@ -242,6 +242,7 @@ private:
     ConversationState *m_convo = nullptr;
     void updateConversationState(const QString &userText, const QString &aiReply, const QString &emotion);
     QString conversationStateBlock() const;  // prompt-ready state section
+    QString timeAwarenessBlock() const;      // current date/weekday/daypart + idle gap since last turn
 
     // v3.9: conflict resolution + importance-gated memory write
     void runConflictResolution(const QString &userText, const QString &memJson);

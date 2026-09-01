@@ -814,6 +814,7 @@ void AiService::idleChat()
             + "【会话纪律】只可说上面[已验证事实]里的内容；没有任何数据时禁止'你又在打游戏''你是不是在玩'这类猜测。"
               "宁可聊推荐话题，也不猜测用户行为。\n"
             + "【当前会话状态】" + conversationStateBlock() + "\n"
+            + timeAwarenessBlock() + "\n"
             + "如果存在未解决的情绪事件，优先延续情绪话题，禁止切换成喝水/睡觉/健康提醒。\n"
             + "【减少固定模板】禁止'喝水/休息/吃饭'式查岗关心，按推荐话题自然延续。\n"
             + "【交流方式——代码强制】你是网络上的线上伙伴，不是现实在场的人。禁止肢体/现实动作描述"
@@ -832,6 +833,54 @@ void AiService::idleChat()
 QString AiService::conversationStateBlock() const
 {
     return m_convo->summary().isEmpty() ? QString("（新会话，无特殊状态）") : m_convo->summary();
+}
+
+// Chinese weekday name (QDate::dayOfWeek: 1=Monday .. 7=Sunday)
+static QString weekdayCn(const QDate &d)
+{
+    static const char *names[] = { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
+    return QString::fromUtf8(names[d.dayOfWeek() - 1]);
+}
+
+// ---- time awareness: current date/weekday/daypart + gap since last turn ----
+// Gives the model an explicit sense of "now" and how long the conversation
+// has been idle, so replies can naturally acknowledge the passage of time
+// instead of guessing or ignoring it.
+QString AiService::timeAwarenessBlock() const
+{
+    const QDateTime now = QDateTime::currentDateTime();
+    const int h = now.time().hour();
+    QString daypart;
+    if (h < 5)       daypart = "深夜";
+    else if (h < 8)  daypart = "清晨";
+    else if (h < 12) daypart = "上午";
+    else if (h < 14) daypart = "中午";
+    else if (h < 18) daypart = "下午";
+    else if (h < 23) daypart = "晚上";
+    else             daypart = "深夜";
+
+    QString gap;
+    const QDateTime lu = m_convo->lastUpdate;
+    if (lu.isValid()) {
+        const qint64 mins = lu.secsTo(now) / 60;
+        if (mins >= 3) {
+            if (mins < 60)
+                gap = QString("距上一条消息约 %1 分钟").arg(mins);
+            else if (mins < 60 * 24)
+                gap = QString("距上次聊天约 %1 小时").arg(mins / 60);
+            else
+                gap = QString("距上次聊天已过 %1 天（上次是 %2）")
+                          .arg(mins / (60 * 24))
+                          .arg(lu.toString("MM-dd HH:mm"));
+        }
+    }
+
+    QString block = QString("【时间感知】现在是 %1 %2（%3）。")
+                        .arg(now.toString("yyyy-MM-dd HH:mm"),
+                             weekdayCn(now.date()), daypart);
+    if (!gap.isEmpty())
+        block += gap + "。可以自然地体现时间的流逝（问候、关心），但不要机械播报时间。";
+    return block;
 }
 
 void AiService::updateConversationState(const QString &userText, const QString &aiReply, const QString &emotion)
@@ -1945,6 +1994,7 @@ void AiService::sendMessage(const QString &text)
         + (m_convo->topicSummary.isEmpty() ? QString("（暂无，继续当前对话）") : m_convo->topicSummary) + "\n"
         + "【当前会话状态】（保持连续性：继续当前话题和情绪，不要跳回通用提醒）\n"
         + conversationStateBlock() + "\n"
+        + timeAwarenessBlock() + "\n"
         + "【会话纪律】如果存在未解决的情绪事件（委屈/压力/孤独/寻求陪伴），必须优先处理情绪，"
           "禁止切换到睡觉/喝水/健康等普通提醒。持续回应当前话题，不要失忆式跳转。\n"
         + "当前策略：" + strategy + "\n"
@@ -1961,8 +2011,10 @@ void AiService::sendMessage(const QString &text)
     if (!m_chatBuffer.isEmpty())
         historyBlock = "\n[Recent chat]\n" + m_chatBuffer.join("\n");
 
-    // time prefix on the user message (KV-cache friendly)
-    QString userMsg = "[" + QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm") + "] "
+    // time prefix on the user message (KV-cache friendly); weekday included
+    // so the model reads the day context without scanning the system block
+    QString userMsg = "[" + QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm")
+                      + " " + weekdayCn(QDate::currentDate()) + "] "
                       + text + "\n" + historyBlock;
 
     // Build role-based messages so the model sees who said what: system persona,

@@ -28,16 +28,18 @@ Button {
                         : variant === "ghost" ? "transparent"
                         : Theme.wallpaperActive ? Theme.btnFill
                         : (glassColor.a > 0 ? glassColor : Qt.rgba(1,1,1,0.08))
+    // hover/press/disabled overlays flip to dark tints on white glass, where
+    // white-on-white overlays would be invisible
     property color vFillHover: variant === "primary" ? Theme.accentHover
-                             : variant === "ghost" ? Qt.rgba(1,1,1,0.05)
+                             : variant === "ghost" ? (Theme.glassMode ? Qt.rgba(0,0,0,0.06) : Qt.rgba(1,1,1,0.05))
                              : Theme.wallpaperActive ? Theme.btnFillHover
                              : (glassHover.a > 0 ? glassHover : Qt.rgba(1,1,1,0.14))
     property color vFillPress: variant === "primary" ? Theme.accentHover
-                             : variant === "ghost" ? Qt.rgba(1,1,1,0.08)
+                             : variant === "ghost" ? (Theme.glassMode ? Qt.rgba(0,0,0,0.10) : Qt.rgba(1,1,1,0.08))
                              : Theme.wallpaperActive ? Theme.btnFillPress
                              : (glassPress.a > 0 ? glassPress : Qt.rgba(1,1,1,0.20))
     property color vBorder: variant === "primary" ? "transparent"
-                          : variant === "ghost" ? "transparent"
+                          : variant === "ghost" ? Theme.glassBorder
                           : Theme.wallpaperActive ? Theme.btnBorder
                           : (borderColor.a > 0 ? borderColor : Qt.rgba(1,1,1,0.12))
     property color vText: variant === "primary" ? "#FFFFFF"
@@ -45,7 +47,7 @@ Button {
 
     background: Rectangle {
         radius: btnRadius
-        color: !root.enabled ? Qt.rgba(1,1,1,0.03)
+        color: !root.enabled ? (Theme.glassMode ? Qt.rgba(0,0,0,0.04) : Qt.rgba(1,1,1,0.03))
              : root.down ? root.vFillPress
              : root.hovered ? root.vFillHover
              : root.vFill

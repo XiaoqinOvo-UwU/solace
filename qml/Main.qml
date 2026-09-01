@@ -345,32 +345,48 @@ ApplicationWindow {
                     }
                 }
 
-                // user menu
+                // user menu — themed in every appearance mode (Fusion's
+                // default popup is light; Theme.cardFill is 14% white on
+                // glass = text unreadable over a bright wallpaper)
+                component UserMenuItem : MenuItem {
+                    height: 36
+                    contentItem: Text {
+                        text: parent.text
+                        color: Theme.text
+                        font.pixelSize: Theme.fsDefault
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 12
+                    }
+                    background: Rectangle {
+                        radius: 6
+                        color: parent.hovered ? Theme.glassHover : "transparent"
+                    }
+                }
                 Menu {
                     id: userMenu
                     width: 200
                     background: Rectangle {
-                        color: Theme.cardFill
+                        color: Theme.glassMode ? Qt.rgba(0.14, 0.14, 0.16, 0.94) : Theme.cardFill
                         radius: 10
                         border.color: Theme.glassBorder
                         border.width: 1
                     }
-                    MenuItem {
+                    UserMenuItem {
                         text: "编 辑资料"
                         onClicked: profileDialog.open()
                     }
-                    MenuItem {
+                    UserMenuItem {
                         text: "设 置"
                         onClicked: pageStack.switchPage(3)
                     }
-                    MenuItem {
+                    UserMenuItem {
                         text: "导 出配置"
                         onClicked: {
                             var ok = syncService.exportConfig(syncService.defaultExportPath())
                             islandToast.show(ok ? "配置已导出到杂货铺" : "导出失败")
                         }
                     }
-                    MenuItem {
+                    UserMenuItem {
                         text: "退 出"
                         onClicked: Qt.quit()
                     }

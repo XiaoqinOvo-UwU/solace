@@ -38,6 +38,12 @@ QtObject {
     // ---- interaction / focus (a11y: visible focus ring on keyboard nav) ----
     // neutral grey — never blue
     readonly property color focusRing:   Qt.rgba(1,1,1,0.45)
+    // input hairline + focus border (white ring is invisible on white glass,
+    // so glass mode switches to the accent)
+    readonly property color inputBorder: glassMode
+             ? Qt.rgba(0, 0, 0, 0.18)
+             : Qt.rgba(255,255,255,0.08)
+    readonly property color inputFocusBorder: glassMode ? accent : focusRing
 
     // ---- glass-mode variants (referenced by the appearance block below) ----
     // Glass mode: WHITE text on the grey-tinted frosted glass (readability).
