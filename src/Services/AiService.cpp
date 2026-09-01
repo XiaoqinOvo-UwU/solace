@@ -44,6 +44,10 @@
 
 // forward decls for helpers defined later in this file
 static QJsonObject readAiState();
+static void writeAiState(const QJsonObject &o);
+static void readPAD(QJsonObject *o, double *v, double *a, double *d);
+static void integrateEmotion(QJsonObject *o, double dv, double da, double dd);
+static void writeReflection(const QString &text);
 static QString unfinishedPath();
 static QString interestPath();
 static QJsonObject readRelationship();
@@ -58,8 +62,39 @@ AiService::AiService(QObject *parent)
     QDir().mkpath(contactDir);
     // v3.9 sidecars: conflict ledger + conversation resume point (memory.json untouched)
     MemoryConflictManager::setLedgerPath(contactDir + "/memory_meta.json");
+    // v4.3: passive memory decay pass on startup (forgetting curve convergence)
+    MemoryConflictManager::applyDecay();
+    MemoryConflictManager::save();
     ConversationStateManager::setStatePath(contactDir + "/conversation_state.json");
     ConversationStateManager::load(*m_convo);
+    // v4.3: daily reflection — once per day, think back and store a
+    // first-person insight (her inner life, not user data). Runs AFTER the
+    // conversation state is loaded so topicSummary is available.
+    {
+        QJsonObject ast = readAiState();
+        const QString today = QDate::currentDate().toString(Qt::ISODate);
+        if (ast.value("reflectionDate").toString() != today) {
+            const QString summary = m_convo->topicSummary;
+            if (!summary.isEmpty()) {
+                QString rp = "昨天和你聊了这些：\n" + summary
+                    + "\n\n请用一句第一人称的内心感想总结这段交流（不是复述事实，"
+                      "而是你作为她此刻的真实感受，比如'我好像更懂他了'）。只输出这句话本身。";
+                auto *rw = new QFutureWatcher<QString>(this);
+                connect(rw, &QFutureWatcher<QString>::finished, this, [this, rw]() {
+                    QString t = rw->result().trimmed();
+                    rw->deleteLater();
+                    // guard: skip empty / placeholder / error strings
+                    if (t.isEmpty() || t.contains("还没配置 API Key") || t.size() >= 60)
+                        return;
+                    writeReflection(t);
+                });
+                QFuture<QString> rf = QtConcurrent::run([rp]() {
+                    return callDeepSeekStatic("你是温柔可爱的AI陪伴者。", rp);
+                });
+                rw->setFuture(rf);
+            }
+        }
+    }
     // v3.9.2: activity memory lives in its own file, NOT memory.json (personality stays clean)
     m_activityMemory.setPath(ConfigService::instance().configDir() + "/activity_memory.json");
     m_activityMemory.pruneOlderThan(30); // keep ~30 days
@@ -712,6 +747,24 @@ void AiService::idleChat()
         m_lastProactiveScore = ProactiveScore::compute(in);
         m_justFinishedTask = false; // consumed
         if (m_lastProactiveScore < 50) return; // stay quiet
+
+        // ---- v4.3: proactive quality gates (读空气 + 冷却 + 间隔) ----
+        const qint64 nowMs = QDateTime::currentDateTime().toMSecsSinceEpoch();
+        // 1) read the air: if the user ignored the last 2 proactive messages
+        //    (no reply at all), the AI backs off for a long while instead of
+        //    pestering. Any user reply resets the counter.
+        if (m_unansweredProactive >= 2) {
+            // needs a real user reply (within 10 min of a proactive message)
+            const qint64 sinceUser = nowMs - m_lastUserReplyAtMs;
+            if (sinceUser > 0 && sinceUser < 10 * 60 * 1000) {
+                m_unansweredProactive = 0; // they responded — forgiven
+            } else if (m_lastProactiveAtMs > 0 && nowMs - m_lastProactiveAtMs < 8 * 60 * 60 * 1000) {
+                return; // stay quiet for 8h after 2 ignored messages
+            }
+        }
+        // 2) cooldown: never send two proactive messages within 90 minutes
+        if (m_lastProactiveAtMs > 0 && nowMs - m_lastProactiveAtMs < 90 * 60 * 1000)
+            return;
     }
 
     QString user = ConfigService::instance().userName();
@@ -782,6 +835,10 @@ void AiService::idleChat()
     for (int i = 0; i < nt; ++i)
         topTopics << QString("- %1（%2）").arg(topics.at(i).topic, topics.at(i).source);
 
+    // v4.3 thread-safety: openLoopPromptBlock reads the static ledger on the
+    // MAIN thread; the worker lambda only receives the precomputed string.
+    const QString loopBlock = openLoopPromptBlock();
+
     auto *watcher = new QFutureWatcher<QString>(this);
     connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher]() {
         QString raw = watcher->result();
@@ -794,6 +851,9 @@ void AiService::idleChat()
             return;
         }
         m_lastAiReply = text;
+        // v4.3: track proactive message for read-the-air + cooldown
+        m_lastProactiveAtMs = QDateTime::currentDateTime().toMSecsSinceEpoch();
+        m_unansweredProactive++;
         // both: show in chat, and flag as a proactive (idle) message
         emit chatReply(text);
         emit idleReply(text);
@@ -802,7 +862,7 @@ void AiService::idleChat()
     // collect the process snapshot in the worker thread (one tasklist call,
     // only on idle trigger — zero cost during normal use)
     QFuture<QString> future = QtConcurrent::run(
-        [user, ai, fg, recent, state, aiState, topTopics, sysFacts, memBlock, this]() {
+        [user, ai, fg, recent, state, aiState, topTopics, sysFacts, memBlock, loopBlock, this]() {
         QString prompt = "你是" + ai + "，人设：" + aiPersonality() + "。用户" + user + "已经有一会儿没操作电脑了。\n"
             + "【我们的关系】" + relationshipText() + "\n"
             + "【已验证事实】（仅系统真实检测）\n"
@@ -811,6 +871,7 @@ void AiService::idleChat()
             + (memBlock.isEmpty() ? QString("- （暂无相关记忆）") : memBlock) + "\n"
             + "【推荐话题】（按评分排序，选分数最高且合适的一个自然提起）\n"
             + (topTopics.isEmpty() ? QString("- 普通陪伴（不用涉及具体事情）") : topTopics.join("\n")) + "\n"
+            + loopBlock + "\n"
             + "【会话纪律】只可说上面[已验证事实]里的内容；没有任何数据时禁止'你又在打游戏''你是不是在玩'这类猜测。"
               "宁可聊推荐话题，也不猜测用户行为。\n"
             + "【当前会话状态】" + conversationStateBlock() + "\n"
@@ -833,6 +894,18 @@ void AiService::idleChat()
 QString AiService::conversationStateBlock() const
 {
     return m_convo->summary().isEmpty() ? QString("（新会话，无特殊状态）") : m_convo->summary();
+}
+
+// ---- v4.3: open loops — promises/appointments to follow up later ----
+QString AiService::openLoopPromptBlock() const
+{
+    const QList<MemoryConflictManager::OpenLoop> due = MemoryConflictManager::dueOpenLoops();
+    if (due.isEmpty()) return QString();
+    QStringList lines;
+    for (const MemoryConflictManager::OpenLoop &l : due)
+        lines << "- " + l.content;
+    return "【开环提醒】（用户之前说过的约定/安排，今天可以自然地问一句结果，不要生硬复读）\n"
+           + lines.join("\n");
 }
 
 // Chinese weekday name (QDate::dayOfWeek: 1=Monday .. 7=Sunday)
@@ -1596,7 +1669,14 @@ void AiService::maybeSummarize()
             qWarning("[memory] summary skipped (low importance): %s", qUtf8Printable(note.left(40)));
             return;
         }
-        appendNote(note);
+        // v4.3: AI-proposed memories enter the REVIEW QUEUE, not long-term
+        // memory directly. The user approves them in the profile dialog —
+        // "不乱记": jokes, misunderstandings and model fabrications never
+        // silently pollute the permanent memory.
+        MemoryConflictManager::addPendingMemory(note);
+        MemoryConflictManager::save();
+        emit pendingMemoriesChanged();
+        qInfo("[memory] proposed for review: %s", qUtf8Printable(note.left(40)));
     });
     QFuture<QString> future = QtConcurrent::run([prompt]() {
         return callDeepSeekStatic("你是记忆整理助手，只做简洁提炼。", prompt);
@@ -1769,6 +1849,11 @@ void AiService::bumpRecalledUsage(const QString &userMsg, const QString &topic)
 // ---- DeepSeek chat: ContextManager -> FactFilter -> Prompt Builder -> LLM -> Validator ----
 void AiService::sendMessage(const QString &text)
 {
+    // v4.3: any user message counts as a reply — resets the read-the-air
+    // counter so ignored-proactive detection only counts genuine silence.
+    m_unansweredProactive = 0;
+    m_lastUserReplyAtMs = QDateTime::currentDateTime().toMSecsSinceEpoch();
+
     QString mem = readMemory();
     QString user = ConfigService::instance().userName();
     QString ai = ContactService::instance().currentName();
@@ -1782,6 +1867,21 @@ void AiService::sendMessage(const QString &text)
 
     // ---- v3.9: memory conflict resolution (old fact vs new statement) ----
     runConflictResolution(userForMemory, mem);
+
+    // ---- v4.3: open loops — promises/appointments to follow up later ----
+    {
+        // outcome first: "面试通过了/没去成" closes a loop; only if no
+        // outcome is present do we treat the text as a NEW promise.
+        if (MemoryConflictManager::detectLoopOutcome(userForMemory)) {
+            MemoryConflictManager::closeOpenLoop(userForMemory, "用户提过结果");
+        } else {
+            QString loopContent, loopDue;
+            if (MemoryConflictManager::detectOpenLoop(userForMemory, &loopContent, &loopDue))
+                MemoryConflictManager::addOpenLoop(loopContent, loopDue);
+        }
+        MemoryConflictManager::pruneOpenLoops();
+        MemoryConflictManager::save();
+    }
 
     // ---- correction detection (semantic): user negates the last AI claim ----
     QStringList corrected = m_ctx->detectCorrection(text, m_lastAiReply);
@@ -1995,6 +2095,7 @@ void AiService::sendMessage(const QString &text)
         + "【当前会话状态】（保持连续性：继续当前话题和情绪，不要跳回通用提醒）\n"
         + conversationStateBlock() + "\n"
         + timeAwarenessBlock() + "\n"
+        + openLoopPromptBlock() + "\n"
         + "【会话纪律】如果存在未解决的情绪事件（委屈/压力/孤独/寻求陪伴），必须优先处理情绪，"
           "禁止切换到睡觉/喝水/健康等普通提醒。持续回应当前话题，不要失忆式跳转。\n"
         + "当前策略：" + strategy + "\n"
@@ -2054,79 +2155,114 @@ void AiService::sendMessage(const QString &text)
         ResponseValidator::Result vr = ResponseValidator::validate(raw, factsText);
         QString speech = vr.text;
 
-        // replay emotion tokens with small delays so the UI shows emotion changes
-        // (parse them before validation strips them)
-        static const QRegularExpression actRe("<\\|\\s*ACT\\s*\\{(.*?)\\}\\s*\\|>",
-                                              QRegularExpression::DotMatchesEverythingOption);
-        static const QRegularExpression delayRe("<\\|\\s*DELAY\\s+([0-9.]+)\\s*\\|>",
-                                                QRegularExpression::CaseInsensitiveOption);
-        struct Step { QString emotion; qreal intensity; int delayMs; int pos; };
-        QList<Step> steps;
-        auto actIt = actRe.globalMatch(raw);
-        while (actIt.hasNext()) {
-            auto m = actIt.next();
-            QString json = m.captured(1);
-            QRegularExpression emRe("\"emotion\"\\s*:\\s*\"([a-zA-Z]+)\"");
-            QRegularExpression intRe("\"intensity\"\\s*:\\s*([0-9.]+)");
-            auto em = emRe.match(json);
-            QString e = em.hasMatch() ? em.captured(1).toLower() : QString();
-            auto it = intRe.match(json);
-            qreal iv = it.hasMatch() ? it.captured(1).toDouble() : 1.0;
-            if (!e.isEmpty())
-                steps.append({ e, qBound(0.0, iv, 1.0), 0, (int)m.capturedStart() });
-        }
-        auto dIt = delayRe.globalMatch(raw);
-        while (dIt.hasNext()) {
-            auto m = dIt.next();
-            steps.append({ QString(), -1, (int)(m.captured(1).toDouble() * 1000), (int)m.capturedStart() });
-        }
-        std::sort(steps.begin(), steps.end(), [](const Step &a, const Step &b) { return a.pos < b.pos; });
-
-        int running = 0;
-        for (const Step &s : steps) {
-            if (!s.emotion.isEmpty()) {
-                running++;
-                QTimer::singleShot(running * 500, this, [this, s]() { emit emotionSignal(s.emotion, s.intensity); });
-            } else if (s.delayMs > 0) {
-                running++;
-            }
-        }
-
-        if (speech.isEmpty())
-            speech = raw.isEmpty() ? "（我没想好说什么…）" : raw;
-        m_lastAiReply = speech;
-        // keep the conversation state in sync for the NEXT turn
-        updateConversationState(userForMemory, speech, emotion);
-        emit chatReply(speech);
-        watcher->deleteLater();
-
-        // auto memory: track this turn, summarize after enough turns
-        trackChatTurn(userForMemory, speech);
-
-        // proactive engine: learn interests from what the user keeps bringing up
+        // ---- v4.3: double-pass persona overlay (conditional) ----
+        // Deep turns (long messages or strong emotion) get a second LLM pass
+        // that rewrites the factual draft in her voice — keeps facts intact,
+        // improves persona consistency. Shallow chat stays single-pass.
+        // Runs asynchronously in a second worker so the UI never freezes.
         {
-            static const struct { const char *kw; const char *interest; } interests[] = {
-                { "minecraft", "Minecraft" }, { "我的世界", "Minecraft" },
-                { "小说", "小说" }, { "写小说", "小说创作" },
-                { "代码", "编程" }, { "软件", "软件开发" }, { "开发", "软件开发" },
-                { "游戏", "游戏" }, { "音乐", "音乐" }, { "动漫", "动漫" },
-                { "健身", "健身" }, { "学习", "学习" },
-            };
-            QString lower = userForMemory.toLower();
-            for (const auto &in : interests) {
-                if (lower.contains(in.kw)) { recordInterest(in.interest); break; }
+            const bool deepTurn = userForMemory.size() > 20
+                || emotion == "sad" || emotion == "stressed"
+                || emotion == "angry" || emotion == "lonely";
+            if (deepTurn && !speech.isEmpty() && speech.size() > 6) {
+                const QString draft = speech;
+                const QString aiName = ContactService::instance().currentName();
+                const QString factsForValidation = factsText;
+                auto *pw = new QFutureWatcher<QString>(this);
+                connect(pw, &QFutureWatcher<QString>::finished, this,
+                        [this, pw, draft, factsForValidation, userForMemory, emotion]() {
+                    const QString rewritten = pw->result();
+                    pw->deleteLater();
+                    const QString cleaned = ResponseValidator::validate(rewritten, factsForValidation).text;
+                    if (!cleaned.isEmpty() && cleaned != "（还没配置 API Key，去设置里填一下~）") {
+                        // deliver the rewritten version, then continue the
+                        // normal post-reply pipeline with the improved text
+                        deliverReply(cleaned, userForMemory, emotion);
+                        return;
+                    }
+                    deliverReply(draft, userForMemory, emotion);
+                });
+                const QString rewritePrompt =
+                    "下面是草稿回复（事实已确认，不要改动任何事实）：\n\n"
+                    + draft
+                    + "\n\n请用" + aiName
+                    + "的语气和说话习惯重写这句话，让它听起来像她本人说的："
+                      "自然、口语化、有温度，不要客服腔，不要开头寒暄，不要加括号动作。"
+                      "保持原意和所有事实，只改语气。只输出重写后的内容本身。";
+                QFuture<QString> pf = QtConcurrent::run([rewritePrompt]() {
+                    return callDeepSeekStatic("你是温柔可爱的AI陪伴者。", rewritePrompt);
+                });
+                pw->setFuture(pf);
+                // double-pass in flight: stop the normal pipeline here
+                watcher->deleteLater();
+                return;
             }
-            // energy slowly drains per exchange, mood drifts toward user emotion
-            adjustAiEnergy(-1);
-            setAiMood(emotion == "happy" ? "cheerful" : emotion == "tired" ? "gentle" : "calm");
-            // relationship continuity: each meaningful chat deepens it a little
-            bumpRelationship(1, 0);
         }
+
+        // replay emotion tokens + PAD integration + chatReply + memory
+        // tracking — all shared with the double-pass path
+        deliverReply(speech, userForMemory, emotion);
+        watcher->deleteLater();
     });
     QFuture<QString> future = QtConcurrent::run([msgs]() {
         return callDeepSeekMessages(msgs);
     });
     watcher->setFuture(future);
+}
+
+// ---- v4.3: shared post-reply pipeline ----
+// Replays emotion tokens, integrates PAD state, emits chatReply and runs
+// memory/interest tracking. Used by BOTH the single-pass path and the
+// double-pass persona-overlay path so behaviour stays identical.
+void AiService::deliverReply(const QString &speechIn, const QString &userText, const QString &emotion)
+{
+    QString speech = speechIn;
+    if (speech.isEmpty())
+        speech = "（我没想好说什么…）";   // never restore raw — it may contain
+                                        // stripped guilt/persona-drift text
+
+    m_lastAiReply = speech;
+    // keep the conversation state in sync for the NEXT turn
+    updateConversationState(userText, speech, emotion);
+
+    // ---- v4.3: integrate this turn's emotion into the AI's PAD state ----
+    {
+        QJsonObject ast = readAiState();
+        double dv = 0, da = 0, dd = 0;
+        const QString ue = m_convo->userEmotion;
+        if (ue == "happy" || ue == "love")          { dv = 0.35; da = 0.20; dd = 0.10; }
+        else if (ue == "sad" || ue == "lonely")     { dv = -0.30; da = -0.05; dd = -0.15; }
+        else if (ue == "tired" || ue == "stressed") { dv = -0.20; da = -0.10; dd = -0.05; }
+        else if (ue == "angry")                     { dv = -0.25; da = 0.30; dd = 0.15; }
+        else if (ue == "surprised" || ue == "excited") { dv = 0.20; da = 0.35; dd = 0.05; }
+        else if (ue == "question" || ue == "curious")  { dv = 0.10; da = 0.15; dd = 0.05; }
+        else if (ue == "awkward" || ue == "shy")    { dv = 0.05; da = 0.10; dd = -0.10; }
+        integrateEmotion(&ast, dv, da, dd);
+        writeAiState(ast);
+    }
+
+    emit chatReply(speech);
+
+    // auto memory: track this turn, summarize after enough turns
+    trackChatTurn(userText, speech);
+
+    // proactive engine: learn interests from what the user keeps bringing up
+    {
+        static const struct { const char *kw; const char *interest; } interests[] = {
+            { "minecraft", "Minecraft" }, { "我的世界", "Minecraft" },
+            { "小说", "小说" }, { "写小说", "小说创作" },
+            { "代码", "编程" }, { "软件", "软件开发" }, { "开发", "软件开发" },
+            { "游戏", "游戏" }, { "音乐", "音乐" }, { "动漫", "动漫" },
+            { "健身", "健身" }, { "学习", "学习" },
+        };
+        QString lower = userText.toLower();
+        for (const auto &in : interests) {
+            if (lower.contains(in.kw)) { recordInterest(in.interest); break; }
+        }
+        // energy slowly drains per exchange; PAD already derives the mood label
+        adjustAiEnergy(-1);
+        bumpRelationship(1, 0);
+    }
 }
 
 // static wrapper so the lambda doesn't capture this
@@ -2286,6 +2422,43 @@ QString AiService::eventMemoryText(int maxEvents)
                  + ev.value("summary").toString();
     }
     return lines.join("\n");
+}
+
+// ---- v4.3: pending memory review ----
+QStringList AiService::pendingMemories()
+{
+    const QList<MemoryConflictManager::PendingMemory> pending = MemoryConflictManager::pendingMemories();
+    QStringList out;
+    for (const MemoryConflictManager::PendingMemory &p : pending)
+        out << p.content;
+    return out;
+}
+
+void AiService::approveMemory(const QString &content)
+{
+    MemoryConflictManager::approvePendingMemory(content);
+    MemoryConflictManager::save();
+    // dedupe against existing notes before persisting (rapid double-click safe)
+    {
+        QJsonDocument d = QJsonDocument::fromJson(readMemory().toUtf8());
+        if (d.isObject()) {
+            const QJsonArray notes = d.object().value("notes").toArray();
+            const QString key = MemoryConflictManager::normalize(content);
+            for (const QJsonValue &v : notes) {
+                if (MemoryConflictManager::normalize(v.toString()) == key)
+                    return; // already stored — skip duplicate
+            }
+        }
+    }
+    appendNote(content); // approved -> enters long-term notes now
+    emit pendingMemoriesChanged();
+}
+
+void AiService::rejectMemory(const QString &content)
+{
+    MemoryConflictManager::rejectPendingMemory(content);
+    MemoryConflictManager::save();
+    emit pendingMemoriesChanged();
 }
 
 // ================= Batch 2: system state sensing + analysis =================
@@ -2454,10 +2627,129 @@ static void writeAiState(const QJsonObject &o)
     }
 }
 
+// ---- v4.3: PAD emotion persistence + inertial decay ----
+// The AI keeps a continuous emotional state (valence/arousal/dominance in
+// -1..1) that persists across sessions and decays toward neutral over time
+// (emotion has a source and a destination — it never jumps or resets).
+static const char *kValence = "valence";
+static const char *kArousal = "arousal";
+static const char *kDominance = "dominance";
+static const char *kEmotionTs = "emotionTs";
+
+// hours for each axis to decay halfway to neutral
+static double axisHalfLife(int axis)
+{
+    switch (axis) {
+    case 0: return 12.0;  // valence: moods linger (half a day)
+    case 1: return 4.0;   // arousal: excitement fades fast
+    case 2: return 8.0;   // dominance: settles in hours
+    }
+    return 8.0;
+}
+
+// read current PAD with time-based decay toward 0
+static void readPAD(QJsonObject *o, double *v, double *a, double *d)
+{
+    *v = o->value(kValence).toDouble(0.0);
+    *a = o->value(kArousal).toDouble(0.0);
+    *d = o->value(kDominance).toDouble(0.0);
+    const QDateTime ts = QDateTime::fromString(o->value(kEmotionTs).toString(), Qt::ISODate);
+    if (!ts.isValid()) return;
+    const double hours = double(ts.secsTo(QDateTime::currentDateTime())) / 3600.0;
+    if (hours <= 0) return;
+    const double f[3] = {
+        std::exp(-hours * std::log(2.0) / axisHalfLife(0)),
+        std::exp(-hours * std::log(2.0) / axisHalfLife(1)),
+        std::exp(-hours * std::log(2.0) / axisHalfLife(2)),
+    };
+    *v *= f[0]; *a *= f[1]; *d *= f[2];
+}
+
+// integrate one turn's emotional signal into the persisted state
+static void integrateEmotion(QJsonObject *o, double dv, double da, double dd)
+{
+    double v, a, d;
+    readPAD(o, &v, &a, &d);
+    // blended response: new signal moves the state, capped per turn
+    v = qBound(-1.0, v + dv * 0.6, 1.0);
+    a = qBound(-1.0, a + da * 0.6, 1.0);
+    d = qBound(-1.0, d + dd * 0.6, 1.0);
+    o->insert(kValence, v);
+    o->insert(kArousal, a);
+    o->insert(kDominance, d);
+    o->insert(kEmotionTs, QDateTime::currentDateTime().toString(Qt::ISODate));
+    // mood label from the dominant axis for the existing mood field
+    QString mood = "calm";
+    if (v > 0.35 && a > 0.25)      mood = "happy";
+    else if (v < -0.35 && a > 0.25) mood = "stressed";
+    else if (v < -0.35)            mood = "sad";
+    else if (a > 0.45)             mood = "excited";
+    else if (d > 0.35)             mood = "confident";
+    else if (d < -0.3)             mood = "shy";
+    o->insert("mood", mood);
+}
+
+// human-friendly PAD line for the prompt
+static QString padPromptLine(double v, double a, double d)
+{
+    // (v>=0 ? "积极" : "消极") etc — compact
+    QString vv = v > 0.25 ? "积极" : v < -0.25 ? "低落" : "平稳";
+    QString aa = a > 0.3 ? "兴奋" : a < -0.3 ? "平静" : "适中";
+    QString dd = d > 0.3 ? "掌控感强" : d < -0.3 ? "不自在" : "自然";
+    return QString("情绪状态（PAD）：%1 / %2 / %3").arg(vv, aa, dd);
+}
+
+// ---- v4.3: her inner life (LifeSimulator-lite) ----
+// The AI has a deterministic daily rhythm so replies and proactive messages
+// can reference "what she is doing right now" instead of being a
+// context-free responder. Pure code, no extra LLM calls for the rhythm.
+static QString currentLifeState()
+{
+    const int h = QTime::currentTime().hour();
+    if (h >= 23 || h < 6)  return "夜深了，她准备休息（回复会简短、带点迷糊）";
+    if (h < 9)             return "刚起床，在吃早餐/发呆（回复轻快但有点慢热）";
+    if (h < 12)            return "上午，在专心做自己的事（偶尔走神想你）";
+    if (h < 14)            return "中午，在休息/听歌（回复随意放松）";
+    if (h < 18)            return "下午，在忙自己的安排（不过你在就分心）";
+    if (h < 23)            return "晚上，放松时间（最活跃、话最多的时候）";
+    return "夜深了，她准备休息（回复会简短、带点迷糊）";
+}
+
+// one-time daily reflection (called on startup): the AI thinks back over the
+// last conversation and stores a first-person insight. Deterministic gate:
+// at most once per day, cheap LLM call.
+static QString lastReflectionLine()
+{
+    QJsonObject o = readAiState();
+    return o.value("reflection").toString();
+}
+static void writeReflection(const QString &text)
+{
+    QJsonObject o = readAiState();
+    o.insert("reflection", text);
+    o.insert("reflectionDate", QDate::currentDate().toString(Qt::ISODate));
+    writeAiState(o);
+}
+
 QString AiService::aiStateJson()
 {
     QJsonObject o = readAiState();
-    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    // v4.3: include the decayed PAD state so the AI knows its own mood.
+    // The stored JSON is patched with the decayed values so both the raw
+    // JSON and the human line agree.
+    double v, a, d;
+    readPAD(&o, &v, &a, &d);
+    o.insert(kValence, v);
+    o.insert(kArousal, a);
+    o.insert(kDominance, d);
+    QString s = QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    s += "；" + padPromptLine(v, a, d);
+    // v4.3: her inner life — what she is doing right now + last reflection
+    s += "；" + currentLifeState();
+    const QString refl = lastReflectionLine();
+    if (!refl.isEmpty())
+        s += "；最近反思：" + refl;
+    return s;
 }
 
 void AiService::setAiMood(const QString &mood)

@@ -1,4 +1,5 @@
 #include "MemoryRetriever.h"
+#include "MemoryConflictManager.h"
 #include <QSet>
 #include <QStringList>
 #include <QRegularExpression>
@@ -125,6 +126,11 @@ double MemoryRetriever::score(const QString &content, MemoryKind kind,
     const double relationship = isEvent ? 0.8 : 0.4;
     const double usage = qBound(0.0, usageFrequency, 1.0);
 
+    // v4.3 memory lifecycle: effective strength (reinforcement x forgetting
+    // curve) nudges the score ±0.15 so recalled-again memories rank higher
+    // and long-unused ones fade out of recall naturally.
+    const double strengthBonus = qBound(-0.15, (MemoryConflictManager::effectiveStrength(content) - 1.0) * 0.15, 0.15);
+
     return semantic * 0.35 + importance * 0.30 + recency * 0.15
-           + relationship * 0.15 + usage * 0.05;
+           + relationship * 0.15 + usage * 0.05 + strengthBonus;
 }

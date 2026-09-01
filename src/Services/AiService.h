@@ -135,6 +135,10 @@ public:
     // ---- companion: relationship state + event memory (batch 1) ----
     Q_INVOKABLE void recordEvent(const QString &type, const QString &summary); // event memory (with date)
     Q_INVOKABLE QString eventMemoryText(int maxEvents); // recent events for prompt injection
+    // v4.3: pending memory review (AI-proposed memories awaiting approval)
+    Q_INVOKABLE QStringList pendingMemories();       // contents awaiting user approval
+    Q_INVOKABLE void approveMemory(const QString &content); // -> enters long-term notes
+    Q_INVOKABLE void rejectMemory(const QString &content);  // -> dropped, never re-proposed
 
     Q_INVOKABLE QString foregroundApp();                 // current foreground window title (lightweight)
 
@@ -184,6 +188,7 @@ signals:
     void emotionSignal(QString emotion, qreal intensity); // AIRI-style ACT token playback
     void profileChanged();                               // name/avatar/persona changed -> refresh UI
     void wallpaperChanged();                             // custom wallpaper set/removed -> refresh backdrop
+    void pendingMemoriesChanged();                      // v4.3: review queue changed (new proposal / approved / rejected)
     void doNotDisturbChanged();                          // DND state changed (UI may show a badge)
 
 private:
@@ -230,6 +235,11 @@ private:
     bool m_justFinishedTask = false;  // just switched from work/gaming to relaxing
     qint64 m_justFinishedTaskAtMs = 0;// when that happened
 
+    // v4.3: proactive message quality gates (读空气 + 冷却防复读 + 间隔)
+    int     m_unansweredProactive = 0;    // consecutive proactive msgs user didn't reply to
+    qint64  m_lastProactiveAtMs = 0;      // when the last proactive message was sent
+    qint64  m_lastUserReplyAtMs = 0;      // when the user last replied (read-the-air)
+
     // v3.9.2: mood trend + relationship state (phase 3)
     MoodTrend m_moodTrend;            // last-10-chat emotion statistics
     RelationshipState m_relationshipState; // relationship_state.json
@@ -241,8 +251,12 @@ private:
     // short-term conversation state (current session only, never persisted)
     ConversationState *m_convo = nullptr;
     void updateConversationState(const QString &userText, const QString &aiReply, const QString &emotion);
+    // v4.3: shared post-reply pipeline (emotion tokens, PAD integration,
+    // chatReply emit, memory tracking) — used by single- and double-pass paths
+    void deliverReply(const QString &speech, const QString &userText, const QString &emotion);
     QString conversationStateBlock() const;  // prompt-ready state section
     QString timeAwarenessBlock() const;      // current date/weekday/daypart + idle gap since last turn
+    QString openLoopPromptBlock() const;     // due open loops (promises to follow up), prompt-ready
 
     // v3.9: conflict resolution + importance-gated memory write
     void runConflictResolution(const QString &userText, const QString &memJson);

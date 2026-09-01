@@ -1,5 +1,6 @@
 #include "MemoryConflictManager.h"
 #include "MemoryImportanceEvaluator.h"
+#include "MemoryRetriever.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -229,6 +230,75 @@ void MemoryConflictManager::bumpUsage(const QString &content)
     QJsonObject last = m_ledger.value("lastUsed").toObject();
     last.insert(key, QDateTime::currentDateTime().toString(Qt::ISODate));
     m_ledger.insert("lastUsed", last);
+    strengthen(key); // recall reinforces the memory
+    m_dirty = true;
+}
+
+// ---- memory lifecycle: reinforcement + forgetting curve ----
+void MemoryConflictManager::strengthen(const QString &content)
+{
+    const QString key = normalize(content);
+    if (key.isEmpty()) return;
+    QJsonObject s = m_ledger.value("strength").toObject();
+    const double cur = s.value(key).toDouble(1.0);
+    s.insert(key, qMin(2.0, cur + 0.10));
+    m_ledger.insert("strength", s);
+    m_dirty = true;
+}
+
+double MemoryConflictManager::strength(const QString &content)
+{
+    return m_ledger.value("strength").toObject().value(normalize(content)).toDouble(1.0);
+}
+
+double MemoryConflictManager::halfLifeDays(MemoryKind kind)
+{
+    switch (kind) {
+    case MemoryKind::UserFact:     return 90.0;  // user said it directly
+    case MemoryKind::HabitMemory:  return 60.0;  // repeated behavior
+    case MemoryKind::MemoryEvent:  return 30.0;  // shared experience
+    case MemoryKind::SystemData:   return 30.0;
+    case MemoryKind::MemorySummary:return 14.0;  // AI interpretation — fades fast
+    }
+    return 30.0;
+}
+
+// strength x forgetting curve: exp(-ageDays*ln2 / halfLife)
+// (halfLife is a true half-life: after `hl` days the remaining boost halves)
+double MemoryConflictManager::effectiveStrength(const QString &content)
+{
+    const QString key = normalize(content);
+    if (key.isEmpty()) return 1.0;
+    const double raw = m_ledger.value("strength").toObject().value(key).toDouble(1.0);
+    const QString lastUsed = m_ledger.value("lastUsed").toObject().value(key).toString();
+    if (lastUsed.isEmpty()) return raw;
+    const QDateTime lu = QDateTime::fromString(lastUsed, Qt::ISODate);
+    if (!lu.isValid()) return raw;
+    const double ageDays = double(lu.secsTo(QDateTime::currentDateTime())) / 86400.0;
+    if (ageDays <= 0) return raw;
+    const double hl = halfLifeDays(MemoryRetriever::classify(key));
+    // decay toward 0.5 baseline (a memory never fully vanishes, just fades)
+    return 0.5 + (raw - 0.5) * std::exp(-ageDays * std::log(2.0) / hl);
+}
+
+void MemoryConflictManager::applyDecay()
+{
+    // passive pass: re-save strength values at their decayed weight so the
+    // ledger converges; only touches entries older than 1 day.
+    const QJsonObject s = m_ledger.value("strength").toObject();
+    QJsonObject out;
+    for (auto it = s.begin(); it != s.end(); ++it) {
+        const QString key = it.key();
+        const QString lastUsed = m_ledger.value("lastUsed").toObject().value(key).toString();
+        const QDateTime lu = QDateTime::fromString(lastUsed, Qt::ISODate);
+        if (!lu.isValid()) { out.insert(key, it.value()); continue; }
+        const double ageDays = double(lu.secsTo(QDateTime::currentDateTime())) / 86400.0;
+        if (ageDays < 1.0) { out.insert(key, it.value()); continue; }
+        const double raw = it.value().toDouble(1.0);
+        const double hl = halfLifeDays(MemoryRetriever::classify(key));
+        out.insert(key, 0.5 + (raw - 0.5) * std::exp(-ageDays * std::log(2.0) / hl));
+    }
+    m_ledger.insert("strength", out);
     m_dirty = true;
 }
 
@@ -243,6 +313,292 @@ double MemoryConflictManager::usageFrequency(const QString &content)
     const int c = usageCount(content);
     // soft curve: usage / (usage + 5) -> 0..1, ~0.83 at 25 recalls
     return double(c) / (double(c) + 5.0);
+}
+
+// ---- pending memory review: AI-proposed memories await user approval ----
+QList<MemoryConflictManager::PendingMemory> MemoryConflictManager::pendingMemories()
+{
+    QList<PendingMemory> out;
+    const QJsonArray arr = m_ledger.value("pendingMemories").toArray();
+    for (const QJsonValue &v : arr) {
+        QJsonObject o = v.toObject();
+        PendingMemory p;
+        p.content = o.value("content").toString();
+        p.created = o.value("created").toString();
+        p.proposals = o.value("proposals").toInt(1);
+        out.append(p);
+    }
+    return out;
+}
+
+void MemoryConflictManager::addPendingMemory(const QString &content)
+{
+    const QString key = content.trimmed();
+    if (key.isEmpty()) return;
+    if (wasRejectedMemory(key)) return; // user said no before — never re-propose
+    QJsonArray arr = m_ledger.value("pendingMemories").toArray();
+    for (int i = 0; i < arr.size(); ++i) {
+        QJsonObject o = arr.at(i).toObject();
+        if (o.value("content").toString() == key) {
+            o.insert("proposals", o.value("proposals").toInt(1) + 1);
+            arr[i] = o;
+            m_ledger.insert("pendingMemories", arr);
+            m_dirty = true;
+            return;
+        }
+    }
+    QJsonObject o;
+    o.insert("content", key);
+    o.insert("created", QDateTime::currentDateTime().toString(Qt::ISODate));
+    o.insert("proposals", 1);
+    arr.append(o);
+    m_ledger.insert("pendingMemories", arr);
+    m_dirty = true;
+}
+
+void MemoryConflictManager::approvePendingMemory(const QString &content)
+{
+    const QString key = content.trimmed();
+    QJsonArray arr = m_ledger.value("pendingMemories").toArray();
+    QJsonArray kept;
+    for (const QJsonValue &v : arr) {
+        if (v.toObject().value("content").toString() != key) kept.append(v);
+    }
+    m_ledger.insert("pendingMemories", kept);
+    m_dirty = true;
+}
+
+void MemoryConflictManager::rejectPendingMemory(const QString &content)
+{
+    const QString key = content.trimmed();
+    approvePendingMemory(key); // remove from pending
+    // remember the rejection so the summarizer never proposes it again
+    QJsonArray rej = m_ledger.value("rejectedMemories").toArray();
+    for (const QJsonValue &v : rej)
+        if (v.toString() == key) return;
+    rej.append(key);
+    m_ledger.insert("rejectedMemories", rej);
+    m_dirty = true;
+}
+
+bool MemoryConflictManager::wasRejectedMemory(const QString &content)
+{
+    const QString key = content.trimmed();
+    const QJsonArray rej = m_ledger.value("rejectedMemories").toArray();
+    for (const QJsonValue &v : rej)
+        if (v.toString() == key) return true;
+    return false;
+}
+
+// ---- open loops: promises / appointments to follow up ----
+QList<MemoryConflictManager::OpenLoop> MemoryConflictManager::openLoops()
+{
+    QList<OpenLoop> out;
+    const QJsonArray arr = m_ledger.value("openLoops").toArray();
+    for (const QJsonValue &v : arr) {
+        QJsonObject o = v.toObject();
+        OpenLoop l;
+        l.content = o.value("content").toString();
+        l.dueDate = o.value("dueDate").toString();
+        l.created = o.value("created").toString();
+        l.status  = o.value("status").toString("open");
+        l.note    = o.value("note").toString();
+        out.append(l);
+    }
+    return out;
+}
+
+QList<MemoryConflictManager::OpenLoop> MemoryConflictManager::dueOpenLoops()
+{
+    QList<OpenLoop> out;
+    const QDate today = QDate::currentDate();
+    for (const OpenLoop &l : openLoops()) {
+        if (l.status != "open") continue;
+        QDate due = QDate::fromString(l.dueDate, Qt::ISODate);
+        if (!due.isValid()) {
+            // no explicit due date: due after one day (next day check-in)
+            due = QDate::fromString(l.created.left(10), Qt::ISODate).addDays(1);
+        }
+        if (due.isValid() && due <= today) out.append(l);
+    }
+    return out;
+}
+
+void MemoryConflictManager::addOpenLoop(const QString &content, const QString &dueDate)
+{
+    const QString key = content.trimmed();
+    if (key.isEmpty()) return;
+    // dedupe: same promise within the same week = refresh, not duplicate
+    QJsonArray arr = m_ledger.value("openLoops").toArray();
+    for (int i = 0; i < arr.size(); ++i) {
+        QJsonObject o = arr.at(i).toObject();
+        if (o.value("status").toString("open") == "open"
+            && o.value("content").toString() == key) {
+            o.insert("dueDate", dueDate);
+            o.insert("created", QDateTime::currentDateTime().toString(Qt::ISODate));
+            arr[i] = o;
+            m_ledger.insert("openLoops", arr);
+            m_dirty = true;
+            return;
+        }
+    }
+    QJsonObject o;
+    o.insert("content", key);
+    o.insert("dueDate", dueDate);
+    o.insert("created", QDateTime::currentDateTime().toString(Qt::ISODate));
+    o.insert("status", "open");
+    arr.append(o);
+    m_ledger.insert("openLoops", arr);
+    m_dirty = true;
+}
+
+void MemoryConflictManager::closeOpenLoop(const QString &content, const QString &result)
+{
+    // direction: the user's NEW message (content) must match against the OLD
+    // promise text (loop.content), not the other way around.
+    QJsonArray arr = m_ledger.value("openLoops").toArray();
+    bool changed = false;
+    for (int i = 0; i < arr.size(); ++i) {
+        QJsonObject o = arr.at(i).toObject();
+        if (o.value("status").toString("open") == "open"
+            && content.contains(o.value("content").toString().mid(0, 12))) {
+            o.insert("status", "closed");
+            o.insert("note", result);
+            arr[i] = o;
+            changed = true;
+        }
+    }
+    if (changed) {
+        m_ledger.insert("openLoops", arr);
+        m_dirty = true;
+    }
+}
+
+// prune stale loops: closed loops keep a rolling cap of 20; open loops older
+// than 30 days are archived to closed so the prompt never grows unbounded.
+void MemoryConflictManager::pruneOpenLoops()
+{
+    QJsonArray arr = m_ledger.value("openLoops").toArray();
+    QJsonArray kept;
+    int closedCount = 0;
+    const QDateTime now = QDateTime::currentDateTime();
+    for (const QJsonValue &v : arr) {
+        QJsonObject o = v.toObject();
+        const QString status = o.value("status").toString("open");
+        const QDateTime created = QDateTime::fromString(o.value("created").toString(), Qt::ISODate);
+        if (status == "open") {
+            // archive open loops older than 30 days
+            if (created.isValid() && created.daysTo(now) > 30) {
+                o.insert("status", "closed");
+                o.insert("note", "过期未结");
+            }
+            kept.append(o);
+        } else {
+            if (closedCount < 20) {
+                kept.append(o);
+                closedCount++;
+            }
+            // older closed loops dropped
+        }
+    }
+    m_ledger.insert("openLoops", kept);
+    m_dirty = true;
+}
+
+// detect a promise/appointment in the user text, e.g. "明天面试", "周末去看房子",
+// "下周交报告", "晚上记得吃药". Returns content + ISO due date (or empty = auto).
+bool MemoryConflictManager::detectOpenLoop(const QString &userText, QString *contentOut, QString *dueOut)
+{
+    // relative day offsets; bare dayparts only count when combined with 今/明
+    static const QHash<QString, int> whenMap = {
+        { "明天上午", 1 }, { "明天下午", 1 }, { "明天晚上", 1 }, { "明天早上", 1 }, { "明早", 1 }, { "明晚", 1 },
+        { "后天", 2 }, { "大后天", 3 },
+        { "下周", 7 },
+        { "明天", 1 },
+        { "今晚", 0 }, { "今天", 0 },
+    };
+    static const QHash<QString, int> weekdayMap = {
+        { "周六", 6 }, { "周日", 7 }, { "星期六", 6 }, { "星期日", 7 }, { "周天", 7 },
+    };
+    // outcome/action verbs that make a promise
+    static const QStringList actionVerbs = {
+        "去", "做", "买", "看", "写", "交", "考", "面", "打", "提", "投",
+        "体检", "复查", "面试", "开会", "出差", "提交", "报名", "预约",
+        "记得", "别忘了", "要交", "要考", "要面", "要打", "要去",
+    };
+    // bare dayparts ("晚上/下午/早上") only create a loop when combined with
+    // 今/明 (e.g. "明天晚上"), which the whenMap already covers with longer
+    // keys first. A bare "晚上记得吃药" is NOT a dated promise.
+    if (!userText.contains("明天") && !userText.contains("今天")
+        && !userText.contains("今晚") && !userText.contains("明晚")
+        && !userText.contains("后天") && !userText.contains("下周")
+        && !userText.contains("周") && !userText.contains("周末")) {
+        // no explicit date at all — not a trackable promise
+        if (userText.contains("晚上") || userText.contains("下午") || userText.contains("早上")
+            || userText.contains("中午")) {
+            return false;
+        }
+    }
+
+    // match the LONGEST time marker first (most specific wins)
+    QString when;
+    QStringList candidates = whenMap.keys();
+    std::sort(candidates.begin(), candidates.end(),
+              [](const QString &a, const QString &b) { return a.size() > b.size(); });
+    for (const QString &k : candidates) {
+        if (userText.contains(k)) { when = k; break; }
+    }
+    if (when.isEmpty()) {
+        // weekday promise ("周六去面试") -> next occurrence of that weekday
+        for (auto it = weekdayMap.constBegin(); it != weekdayMap.constEnd(); ++it) {
+            if (userText.contains(it.key())) {
+                const int todayDow = QDate::currentDate().dayOfWeek(); // 1=Mon..7=Sun
+                const int targetDow = it.value();
+                int offset = (targetDow - todayDow + 7) % 7;
+                if (offset == 0) offset = 7; // today's weekday -> next week
+                if (contentOut) *contentOut = userText.trimmed();
+                if (dueOut) *dueOut = QDate::currentDate().addDays(offset).toString(Qt::ISODate);
+                return true;
+            }
+        }
+        // "周末" -> next Saturday (or Sunday if today is Saturday)
+        if (userText.contains("周末")) {
+            const int todayDow = QDate::currentDate().dayOfWeek();
+            int offset = (6 - todayDow + 7) % 7;
+            if (offset == 0) offset = 7;
+            if (contentOut) *contentOut = userText.trimmed();
+            if (dueOut) *dueOut = QDate::currentDate().addDays(offset).toString(Qt::ISODate);
+            return true;
+        }
+        return false;
+    }
+    // must also carry an action verb (a date alone isn't a promise)
+    bool hasAction = false;
+    for (const QString &v : actionVerbs)
+        if (userText.contains(v)) { hasAction = true; break; }
+    if (!hasAction) return false;
+
+    QString content = userText.trimmed();
+    if (content.size() > 40) content = content.left(40) + "…";
+    if (contentOut) *contentOut = content;
+    if (dueOut) {
+        int offset = whenMap.value(when, 1);
+        *dueOut = QDate::currentDate().addDays(offset).toString(Qt::ISODate);
+    }
+    return true;
+}
+
+// did the user report the outcome of an open loop?
+bool MemoryConflictManager::detectLoopOutcome(const QString &userText)
+{
+    static const QStringList outcomeWords = {
+        "完成了", "通过了", "过了", "黄了", "没去", "取消了", "放弃了", "没成",
+        "搞定了", "成功了", "失败", "没考上", "没过", "没交", "交了", "去了",
+        "面完了", "考完了", "写完了", "提交了", "报名了", "预约了", "开始搞",
+    };
+    for (const QString &w : outcomeWords)
+        if (userText.contains(w)) return true;
+    return false;
 }
 
 void MemoryConflictManager::reload()

@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QSet>
 #include <QDateTime>
+#include "FactModel.h"
 
 // =====================================================================
 // MemoryConflictManager — resolves contradictions between old long-term
@@ -58,6 +59,48 @@ public:
     static void bumpUsage(const QString &content);
     static int usageCount(const QString &content);
     static double usageFrequency(const QString &content); // 0.0 ~ 1.0 normalized
+
+    // ---- memory lifecycle (v4.3): reinforcement + forgetting curve ----
+    // strength starts at 1.0; recall strengthens (+0.1, cap 2.0), time decays
+    // it toward the kind half-life baseline. Decay never deletes data — it
+    // only lowers the effective weight so old/less-relevant memories fade
+    // out of recall (like people).
+    static void   strengthen(const QString &content);            // called by bumpUsage
+    static double strength(const QString &content);              // raw ledger value
+    static double effectiveStrength(const QString &content);     // strength x decay
+    static void   applyDecay();                                  // passive decay pass
+    static double halfLifeDays(MemoryKind kind);                 // 90/60/30/14
+
+    // ---- pending memory review (v4.3): AI-proposed memories wait for
+    // user approval before entering long-term memory ("不乱记") ----
+    struct PendingMemory {
+        QString content;
+        QString created;   // ISO datetime
+        int     proposals = 1;  // times the same content was proposed
+    };
+    static QList<PendingMemory> pendingMemories();
+    static void addPendingMemory(const QString &content);        // proposed by summarizer
+    static void approvePendingMemory(const QString &content);    // -> caller persists note
+    static void rejectPendingMemory(const QString &content);     // + remembered as rejected
+    static bool wasRejectedMemory(const QString &content);       // never propose again
+
+    // ---- open loops (v4.3): promises / appointments to follow up ----
+    // "明天面试" -> an open loop the AI can ask about when it's due.
+    struct OpenLoop {
+        QString content;     // what was promised ("明天面试")
+        QString dueDate;     // ISO date when it should be asked about (empty = auto)
+        QString created;     // ISO datetime
+        QString status;      // "open" | "closed"
+        QString note;        // result if closed ("通过了")
+    };
+    // returns loops that are open AND due (dueDate <= today, or auto after 1 day)
+    static QList<OpenLoop> dueOpenLoops();
+    static QList<OpenLoop> openLoops();
+    static void addOpenLoop(const QString &content, const QString &dueDate);
+    static void closeOpenLoop(const QString &content, const QString &result);
+    static void pruneOpenLoops();                               // cap + archive stale loops
+    static bool detectOpenLoop(const QString &userText, QString *contentOut, QString *dueOut);
+    static bool detectLoopOutcome(const QString &userText);      // "完成了/黄了/通过了..."
 
     // normalize a note string: strip trailing "（yyyy-MM-dd HH:mm）" suffix
     // and whitespace so the same fact written on different days matches.

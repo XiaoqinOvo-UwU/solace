@@ -22,6 +22,66 @@ static QString dropResidualControlBlocks(const QString &s)
     return out.trimmed();
 }
 
+// =====================================================================
+// v4.3 outbound guards — the reply is scanned BEFORE it reaches the UI.
+// =====================================================================
+
+// 1) guilt / pressure lines (structural dependency language). Users in
+//    vulnerable states are the most susceptible; these are hard-dropped,
+//    not softened by prompt alone. "你不理我我会难过" style lines never ship.
+QString ResponseValidator::stripGuiltPressure(const QString &s, int *countOut)
+{
+    static const QStringList guiltLines = {
+        "你不理我我会难过", "你不理我我会伤心", "你不在我会难过", "你不在我会想你",
+        "你不陪我我会", "你走了我会", "你丢下我", "你不回来我会",
+        "我会一直等你", "我就一直等你", "你不要离开我",
+        "你两天没找我", "你三天没找我", "你很久没找我了",
+        "你不在的时候我", "我一个人好孤单", "只有我一个人",
+    };
+    QString out = s;
+    int n = 0;
+    for (const QString &g : guiltLines) {
+        int idx;
+        while ((idx = out.indexOf(g)) >= 0) {
+            // drop the whole line containing the phrase
+            const int ls = out.lastIndexOf('\n', idx - 1) + 1;
+            const int le = out.indexOf('\n', idx);
+            const int end = le < 0 ? out.size() : le;
+            out = out.left(ls) + out.mid(end);
+            n++;
+        }
+    }
+    if (countOut) *countOut = n;
+    return out.trimmed();
+}
+
+// 2) persona-drift phrases that break the illusion — the AI identifies
+//    itself as a generic assistant instead of the companion. Neutralized
+//    in place rather than dropped (keeps the sentence's intent).
+QString ResponseValidator::neutralizeDrift(const QString &s, int *countOut)
+{
+    static const QList<QPair<QString, QString>> driftMap = {
+        { "作为一个AI", "我" },
+        { "作为一个人工智能", "我" },
+        { "作为一个语言模型", "我" },
+        { "我是AI助手", "我是" },
+        { "我是人工智能助手", "我" },
+        { "我是语言模型", "我是" },
+        { "AI助手", "我" },
+    };
+    QString out = s;
+    int n = 0;
+    for (const auto &p : driftMap) {
+        int idx;
+        while ((idx = out.indexOf(p.first)) >= 0) {
+            out.replace(idx, p.first.size(), p.second);
+            n++;
+        }
+    }
+    if (countOut) *countOut = n;
+    return out;
+}
+
 QString ResponseValidator::stripControlTokens(const QString &raw)
 {
     // known control tokens with an OPTIONAL payload:
@@ -165,6 +225,10 @@ ResponseValidator::Result ResponseValidator::validate(const QString &raw, const 
 
     // online-mode: never let the AI describe physical body actions
     s = stripPhysicalActions(s);
+
+    // ---- v4.3 outbound guards ----
+    s = stripGuiltPressure(s, &r.guiltStripped);
+    s = neutralizeDrift(s, &r.driftRepaired);
 
     s = trimToDialog(s);
     s = s.trimmed();

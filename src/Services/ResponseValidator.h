@@ -29,11 +29,17 @@ public:
         int     stagedStripped = 0;
         int     observationsStripped = 0;
         int     observationsRepaired = 0;
+        int     guiltStripped = 0;       // v4.3: manipulative pressure lines dropped
+        int     driftRepaired = 0;       // v4.3: persona-drift phrases neutralized
     };
 
     // main entry: `verifiedFacts` = the [确定] fact block text used in the
     // prompt (used to decide whether an observation is supported).
     static Result validate(const QString &raw, const QString &verifiedFacts);
+
+    // v4.3 outbound guards (public for reuse/tests)
+    static QString stripGuiltPressure(const QString &s, int *countOut = nullptr); // 愧疚/施压话术硬拦截
+    static QString neutralizeDrift(const QString &s, int *countOut = nullptr);    // 人设漂移话术改写
 
     // lightweight helpers (public for reuse/tests)
     static QString stripControlTokens(const QString &raw);   // think/ACT/DELAY

@@ -163,6 +163,75 @@ Item {
                             }
                         }
                     }
+
+                    // ---- pending memory review (v4.3): AI-proposed memories ----
+                    // Shown when the summarizer proposed something worth remembering.
+                    // Approve -> enters long-term notes; Reject -> never proposed again.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: reviewList.count > 0
+                        spacing: Theme.sp2
+                        Text {
+                            text: "待审核记忆（AI 建议记住）"
+                            color: Theme.text
+                            font.pixelSize: Theme.fsSmall
+                            font.bold: true
+                        }
+                        ListView {
+                            id: reviewList
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.min(count, 3) * 48
+                            clip: true
+                            spacing: Theme.sp2
+                            model: aiService.pendingMemories()
+                            delegate: Rectangle {
+                                width: reviewList.width
+                                height: 44
+                                radius: Theme.rMd
+                                color: Theme.inputBg
+                                border.color: Theme.inputBorder
+                                border.width: 1
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: Theme.sp2
+                                    spacing: Theme.sp2
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fsSmall
+                                        elide: Text.ElideRight
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    AppButton {
+                                        text: "记住"
+                                        variant: "secondary"
+                                        implicitHeight: 28
+                                        onClicked: {
+                                            aiService.approveMemory(modelData)
+                                            reviewList.model = aiService.pendingMemories()
+                                            dlg.toast("已记住~")
+                                        }
+                                    }
+                                    AppButton {
+                                        text: "不要"
+                                        variant: "ghost"
+                                        implicitHeight: 28
+                                        onClicked: {
+                                            aiService.rejectMemory(modelData)
+                                            reviewList.model = aiService.pendingMemories()
+                                            dlg.toast("已忽略")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // refresh the review list whenever the queue changes
+                    Connections {
+                        target: aiService
+                        function onPendingMemoriesChanged() { reviewList.model = aiService.pendingMemories() }
+                    }
                     }
                 }
             }
