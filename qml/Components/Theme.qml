@@ -6,10 +6,12 @@ import QtQuick
 // Keep component files token-driven: no random hex or 13px in pages.
 QtObject {
     // ================= COLOR =================
-    // ---- backgrounds (black-grey) ----
-    readonly property color bg:          "#141414"
-    readonly property color surface:     "#1E1E1E"
-    readonly property color card:        "#1E1E1E"
+    // ---- backgrounds (black-grey, tinted with the accent hue ~217°) ----
+    // Rule: never a pure neutral — every surface carries a trace of the
+    // brand hue so accents feel native to the surface (premium-UI baseline).
+    readonly property color bg:          "#141518"
+    readonly property color surface:     "#1E2024"
+    readonly property color card:        "#1E2024"
 
     // ---- accents ----
     readonly property color accent:      "#3A3F4A"
@@ -17,8 +19,8 @@ QtObject {
     readonly property color selected:    "#33383F"
 
     // hover highlight — neutral grey tint (no blue)
-    readonly property color hoverBg:     "#252525"
-    readonly property color hoverBgStrong: "#2E2E2E"
+    readonly property color hoverBg:     "#25272C"
+    readonly property color hoverBgStrong: "#2E3137"
 
     // ---- status ----
     readonly property color ok:          "#5FA87A"
@@ -48,10 +50,10 @@ QtObject {
     // ---- glass-mode variants (referenced by the appearance block below) ----
     // Glass mode: WHITE text on the grey-tinted frosted glass (readability).
     // NOTE: sidebar/navigation KEEPS its dark colour in every mode (user rule).
-    readonly property color sidebar:     "#0D0D0D"
+    readonly property color sidebar:     "#0D0E11"
     readonly property color inputBg:     glassMode
              ? Qt.rgba(1, 1, 1, 0.09)
-             : "#262626"
+             : "#26282D"
     readonly property color text:        glassMode ? "#FFFFFF" : "#F0F0F0"
     readonly property color textDim:     glassMode ? Qt.rgba(1,1,1,0.75) : "#9A9A9A"
     readonly property color textMuted:   glassMode ? Qt.rgba(1,1,1,0.65) : "#B0B0B0"
