@@ -30,7 +30,11 @@ Dialog {
     padding: 0
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.durMid; easing.type: Easing.OutCubic }
+        ParallelAnimation {
+            // opacity = cubic; scale = subtle spring settle (physical weight)
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.durMid; easing.type: Easing.OutCubic }
+            SpringAnimation { property: "scale"; from: 0.96; to: 1.0; spring: 4.5; damping: 0.72; epsilon: 0.004 }
+        }
     }
     exit: Transition {
         NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.durFast; easing.type: Easing.InCubic }

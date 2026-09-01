@@ -310,7 +310,7 @@ Item {
                                     Component.onCompleted: value = aiService.relationshipIntimacy()
                                     onValueChanged: aiService.setRelationship(value, aiService.relationshipTrust())
                                 }
-                                Text { text: relIntimacy.value; color: Theme.textDim; font.pixelSize: Theme.fsCaption }
+                                Text { text: relIntimacy.value; color: Theme.textDim; font.pixelSize: Theme.fsCaption; font.features: { "tnum": 1 } }
                             }
                             Text { text: "信任度"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
                             RowLayout {
@@ -322,7 +322,7 @@ Item {
                                     Component.onCompleted: value = aiService.relationshipTrust()
                                     onValueChanged: aiService.setRelationship(aiService.relationshipIntimacy(), value)
                                 }
-                                Text { text: relTrust.value; color: Theme.textDim; font.pixelSize: Theme.fsCaption }
+                                Text { text: relTrust.value; color: Theme.textDim; font.pixelSize: Theme.fsCaption; font.features: { "tnum": 1 } }
                             }
                             Text {
                                 Layout.fillWidth: true
@@ -523,6 +523,7 @@ Item {
                                 width: parent.width
                                 color: Theme.text
                                 font.pixelSize: Theme.fsDefault
+                                font.features: { "tnum": 1 }
                                 readOnly: true
                                 wrapMode: TextEdit.Wrap
                                 background: null

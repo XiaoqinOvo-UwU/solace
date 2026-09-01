@@ -727,8 +727,10 @@ ApplicationWindow {
                     id: itemBehavior
                     property Item target
                     ParallelAnimation {
+                        // opacity = cubic (no physical metaphor); scale = spring
+                        // (spatial movement settles with a subtle overshoot)
                         NumberAnimation { target: itemBehavior.target; property: "opacity"; to: 1; duration: 170; easing.type: Easing.OutCubic }
-                        NumberAnimation { target: itemBehavior.target; property: "scale"; to: 1.0; duration: 170; easing.type: Easing.OutCubic }
+                        SpringAnimation { target: itemBehavior.target; property: "scale"; from: 0.96; to: 1.0; spring: 4.5; damping: 0.72; epsilon: 0.004 }
                     }
                 }
 

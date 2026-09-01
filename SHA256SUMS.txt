@@ -1,1 +1,1 @@
-﻿2af8db1b9da705a92ed47944519689ec2ee6619b368924c7bf2fb7dcfb2fde91  xiaoqintools-4.2.1-setup.zip
+﻿cf928887d5d0e61a7a90830e62ffe84e42db2f9c2fc3b416d21455bc1bd6fed3  xiaoqintools-4.2.2-setup.zip

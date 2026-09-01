@@ -92,6 +92,12 @@ int main(int argc, char *argv[])
             const DWORD round = 2; // DWMWCP_ROUND
             DwmSetWindowAttribute(hwnd, 33 /*DWMWA_WINDOW_CORNER_PREFERENCE*/,
                                   &round, sizeof(round));
+            // Frameless windows lose the DWM minimize/restore taskbar animation
+            // because they lack WS_CAPTION|WS_MINIMIZEBOX. Add the style bits
+            // back: DWM plays the system animation again while Qt keeps drawing
+            // no title bar (the standard Electron-style hidden-titlebar hack).
+            const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_CAPTION | WS_MINIMIZEBOX);
         }
     }
 #endif

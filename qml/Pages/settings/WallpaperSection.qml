@@ -200,6 +200,7 @@ SettingsSectionCard {
             text: wpBlurSlider.value
             color: Theme.textDim
             font.pixelSize: 12
+            font.features: { "tnum": 1 }
             Layout.preferredWidth: 24
             horizontalAlignment: Text.AlignRight
         }
