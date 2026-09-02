@@ -135,10 +135,6 @@ public:
     // ---- companion: relationship state + event memory (batch 1) ----
     Q_INVOKABLE void recordEvent(const QString &type, const QString &summary); // event memory (with date)
     Q_INVOKABLE QString eventMemoryText(int maxEvents); // recent events for prompt injection
-    // v4.3: pending memory review (AI-proposed memories awaiting approval)
-    Q_INVOKABLE QStringList pendingMemories();       // contents awaiting user approval
-    Q_INVOKABLE void approveMemory(const QString &content); // -> enters long-term notes
-    Q_INVOKABLE void rejectMemory(const QString &content);  // -> dropped, never re-proposed
 
     Q_INVOKABLE QString foregroundApp();                 // current foreground window title (lightweight)
 
@@ -188,7 +184,6 @@ signals:
     void emotionSignal(QString emotion, qreal intensity); // AIRI-style ACT token playback
     void profileChanged();                               // name/avatar/persona changed -> refresh UI
     void wallpaperChanged();                             // custom wallpaper set/removed -> refresh backdrop
-    void pendingMemoriesChanged();                      // v4.3: review queue changed (new proposal / approved / rejected)
     void doNotDisturbChanged();                          // DND state changed (UI may show a badge)
 
 private:

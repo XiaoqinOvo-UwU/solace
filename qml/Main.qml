@@ -329,7 +329,8 @@ ApplicationWindow {
                     }
 
                     // time-of-day greeting: inside the header block, anchored
-                    // to its bottom-left, left-aligned with the avatar
+                    // to its bottom-left, left-aligned with the avatar.
+                    // Refreshed every minute by the greetTimer below.
                     Text {
                         id: timeGreetText
                         anchors.left: parent.left
@@ -1058,8 +1059,10 @@ ApplicationWindow {
     property bool restReminded: false
 
     // keep the sidebar time-greeting accurate across hour boundaries
+    // (Timer defaults to not running — explicit running: true required)
     Timer {
         interval: 60000
+        running: true
         repeat: true
         onTriggered: timeGreetText.text = root.timeGreeting()
     }

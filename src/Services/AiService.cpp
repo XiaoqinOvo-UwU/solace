@@ -1669,14 +1669,10 @@ void AiService::maybeSummarize()
             qWarning("[memory] summary skipped (low importance): %s", qUtf8Printable(note.left(40)));
             return;
         }
-        // v4.3: AI-proposed memories enter the REVIEW QUEUE, not long-term
-        // memory directly. The user approves them in the profile dialog —
-        // "不乱记": jokes, misunderstandings and model fabrications never
-        // silently pollute the permanent memory.
-        MemoryConflictManager::addPendingMemory(note);
-        MemoryConflictManager::save();
-        emit pendingMemoriesChanged();
-        qInfo("[memory] proposed for review: %s", qUtf8Printable(note.left(40)));
+        // v4.3.1: the AI decides — summaries above the importance threshold
+        // enter long-term memory directly (no user review queue).
+        appendNote(note);
+        qInfo("[memory] stored: %s", qUtf8Printable(note.left(40)));
     });
     QFuture<QString> future = QtConcurrent::run([prompt]() {
         return callDeepSeekStatic("你是记忆整理助手，只做简洁提炼。", prompt);
@@ -2422,43 +2418,6 @@ QString AiService::eventMemoryText(int maxEvents)
                  + ev.value("summary").toString();
     }
     return lines.join("\n");
-}
-
-// ---- v4.3: pending memory review ----
-QStringList AiService::pendingMemories()
-{
-    const QList<MemoryConflictManager::PendingMemory> pending = MemoryConflictManager::pendingMemories();
-    QStringList out;
-    for (const MemoryConflictManager::PendingMemory &p : pending)
-        out << p.content;
-    return out;
-}
-
-void AiService::approveMemory(const QString &content)
-{
-    MemoryConflictManager::approvePendingMemory(content);
-    MemoryConflictManager::save();
-    // dedupe against existing notes before persisting (rapid double-click safe)
-    {
-        QJsonDocument d = QJsonDocument::fromJson(readMemory().toUtf8());
-        if (d.isObject()) {
-            const QJsonArray notes = d.object().value("notes").toArray();
-            const QString key = MemoryConflictManager::normalize(content);
-            for (const QJsonValue &v : notes) {
-                if (MemoryConflictManager::normalize(v.toString()) == key)
-                    return; // already stored — skip duplicate
-            }
-        }
-    }
-    appendNote(content); // approved -> enters long-term notes now
-    emit pendingMemoriesChanged();
-}
-
-void AiService::rejectMemory(const QString &content)
-{
-    MemoryConflictManager::rejectPendingMemory(content);
-    MemoryConflictManager::save();
-    emit pendingMemoriesChanged();
 }
 
 // ================= Batch 2: system state sensing + analysis =================

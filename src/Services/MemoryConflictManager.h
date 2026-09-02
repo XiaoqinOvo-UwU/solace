@@ -71,19 +71,6 @@ public:
     static void   applyDecay();                                  // passive decay pass
     static double halfLifeDays(MemoryKind kind);                 // 90/60/30/14
 
-    // ---- pending memory review (v4.3): AI-proposed memories wait for
-    // user approval before entering long-term memory ("不乱记") ----
-    struct PendingMemory {
-        QString content;
-        QString created;   // ISO datetime
-        int     proposals = 1;  // times the same content was proposed
-    };
-    static QList<PendingMemory> pendingMemories();
-    static void addPendingMemory(const QString &content);        // proposed by summarizer
-    static void approvePendingMemory(const QString &content);    // -> caller persists note
-    static void rejectPendingMemory(const QString &content);     // + remembered as rejected
-    static bool wasRejectedMemory(const QString &content);       // never propose again
-
     // ---- open loops (v4.3): promises / appointments to follow up ----
     // "明天面试" -> an open loop the AI can ask about when it's due.
     struct OpenLoop {
