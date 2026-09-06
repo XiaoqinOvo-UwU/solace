@@ -58,16 +58,17 @@ Rectangle {
                 if (ts > 0 && prevTs > 0 && (ts - prevTs) > chatPage.gapThresholdMs)
                     timeLabel = fmtTime(ts)
                 if (ts > 0) prevTs = ts
-                msgModel.append({ "isAi": isAi, "msg": msg, "timeLabel": timeLabel, "grouped": false })
+                msgModel.append({ "isAi": isAi, "msg": msg, "timeLabel": timeLabel, "grouped": false, "ts": ts })
                 hist.push((isAi ? aiService.aiName() : (aiService.userName() || "用户")) + ": " + msg)
             }
             chatPage.lastMsgTs = prevTs
+            chatPage.typingRow = -1
             // seed AI context with this conversation so it can see past messages
             aiService.setChatHistory(hist.join("\n"))
         })
         // if this contact has no history yet, show a greeting bubble
         if (msgModel.count === 0)
-            msgModel.append({ "isAi": true, "msg": "你好，我是" + aiService.aiName() + "。", "timeLabel": "", "grouped": false })
+            msgModel.append({ "isAi": true, "msg": "你好，我是" + aiService.aiName() + "。", "timeLabel": "", "grouped": false, "ts": Date.now() })
         Qt.callLater(function() { msgView.positionViewAtEnd() })
     }
 
@@ -140,6 +141,7 @@ Rectangle {
         var start = Math.max(0, msgModel.count - n)
         for (var i = start; i < msgModel.count; i++) {
             var m = msgModel.get(i)
+            if (m.isAi && m.msg === "...") continue   // typing placeholder, not a real message
             var who = m.isAi ? aiService.aiName() : (aiService.userName() || "用户")
             out.push(who + ": " + m.msg)
         }
@@ -292,29 +294,17 @@ Rectangle {
             spacing: 8
             model: msgModel
             // track whether the user is pinned to the bottom (so we don't yank
-            // the view away while they scroll up through history)
+            // the view away while they scroll up through history).
+            // NOTE: deliberately NO positionViewAtEnd here or on contentHeight/
+            // count changes — pinning on ANY contentHeight change feeds back
+            // into delegate churn, which changes contentHeight again: a
+            // never-converging loop that yanks the user back to the bottom.
+            // Real appends pin explicitly at their call sites instead.
             property bool stickToBottom: true
             onContentYChanged: {
                 // if user scrolled away from bottom, stop auto-following
                 var dist = contentHeight - contentY - height
                 stickToBottom = dist <= 40
-            }
-            // whenever the content grows (new message or text wrapping to more
-            // lines), follow the bottom if the user is pinned there. Deferring
-            // twice lets the delegate height settle before we jump.
-            onContentHeightChanged: {
-                if (stickToBottom) {
-                    Qt.callLater(function() { positionViewAtEnd() })
-                    Qt.callLater(function() { Qt.callLater(function() { positionViewAtEnd() }) })
-                }
-            }
-            // a new row appended: jump immediately (before it wraps), then again
-            // once the content height settles
-            onCountChanged: {
-                if (stickToBottom) {
-                    Qt.callLater(function() { positionViewAtEnd() })
-                    Qt.callLater(function() { Qt.callLater(function() { positionViewAtEnd() }) })
-                }
             }
             delegate: Item {
                 id: delegateRoot
@@ -418,12 +408,66 @@ Rectangle {
                             NumberAnimation { target: bubbleScale; property: "yScale"; from: 0.97; to: 1.0; duration: 220; easing.type: Easing.OutBack }
                         }
 
-                        // multi-line replies: keep the view pinned to the bottom
-                        onHeightChanged: {
-                            if (msgView && msgView.stickToBottom) {
-                                Qt.callLater(function() { if (msgView) msgView.positionViewAtEnd() })
-                                Qt.callLater(function() { Qt.callLater(function() { if (msgView) msgView.positionViewAtEnd() }) })
+                    }
+                    // NOTE: no heightChanged pin here — a pin on ANY delegate
+                    // height change feeds the churn→pin→churn loop that yanks
+                    // the user back to the bottom. Follow-ups happen explicitly
+                    // in replyTimer where real content changes.
+
+                    // hover affordances (Telegram/lobe-chat style): timestamp +
+                    // copy pill float outside the bubble, in the margin every
+                    // bubble already reserves (bubbles cap at half width - 56)
+                    // hover tracking WITHOUT any event grabbing: HoverHandler
+                    // never accepts buttons, wheel or gestures, so the ListView
+                    // keeps full control of scrolling (a MouseArea here, even a
+                    // no-button one, made the list unscrollable)
+                    HoverHandler {
+                        id: rowHover
+                    }
+                    Row {
+                        id: hoverTools
+                        spacing: 6
+                        opacity: rowHover.hovered && model.msg !== "..." ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                        anchors.top: bubble.top
+                        anchors.left: model.isAi ? bubble.right : undefined
+                        anchors.leftMargin: model.isAi ? 6 : 0
+                        anchors.right: model.isAi ? undefined : bubble.left
+                        anchors.rightMargin: model.isAi ? 0 : 6
+                        layoutDirection: model.isAi ? Qt.LeftToRight : Qt.RightToLeft
+
+                        Text {
+                            visible: model.ts > 0
+                            text: model.ts > 0 ? Qt.formatTime(new Date(model.ts), "HH:mm") : ""
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fsCaption
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Rectangle {
+                            width: 44; height: 22; radius: 11
+                            color: copyMa.pressed ? Theme.glassPress
+                                 : copyMa.containsMouse ? Theme.glassHover
+                                 : Theme.btnFill
+                            border.color: Theme.glassBorder
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "复制"
+                                color: Theme.text
+                                font.pixelSize: Theme.fsCaption
                             }
+                            MouseArea {
+                                id: copyMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    proxyService.copyToClipboard(model.msg)
+                                    setHeaderStatus("已复制")
+                                }
+                            }
+                            Accessible.name: "复制这条消息"
+                            Accessible.role: Accessible.Button
                         }
                     }
                 }
@@ -454,31 +498,50 @@ Rectangle {
                 color: Theme.textMuted
                 font.pixelSize: Theme.fsCaption
             }
+            // starter prompts (ai-chat-ui pattern): one click sends the opener,
+            // the empty state invites action instead of being a dead end
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Theme.sp2
+                Repeater {
+                    model: ["今天过得怎么样？", "最近有什么开心的事吗", "陪我聊聊天吧"]
+                    AppButton {
+                        text: modelData
+                        variant: "ghost"
+                        btnHeight: 32
+                        onClicked: {
+                            chatInput.text = modelData
+                            sendMsg()
+                        }
+                    }
+                }
+            }
         }
         ListModel { id: msgModel }
 
-        // input bar
+        // input bar: auto-growing multiline field (NextChat pattern) —
+        // Enter sends, Shift+Enter inserts a newline, grows to ~4 lines
         Rectangle {
+            id: inputBar
             Layout.fillWidth: true
-            Layout.preferredHeight: 60
+            Layout.preferredHeight: inputBox.height + 22
             color: Theme.chatPanelBg
             // no outer border box — the input field itself carries the focus ring
-            border.color: "transparent"
-            border.width: 0
 
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 10
+                anchors.margins: 11
                 spacing: 8
                 Rectangle {
+                    id: inputBox
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 38
+                    implicitHeight: Math.min(118, Math.max(38, chatInput.implicitHeight))
                     radius: 16
                     color: Theme.inputFill
                     // visible focus ring when the input is active (a11y)
                     border.color: chatInput.activeFocus ? Theme.focusRing : "transparent"
                     border.width: 1
-                    TextField {
+                    TextArea {
                         id: chatInput
                         anchors.fill: parent
                         color: Theme.text
@@ -486,12 +549,19 @@ Rectangle {
                         placeholderTextColor: Theme.textDim
                         background: null
                         font.pixelSize: Theme.fsBody
+                        wrapMode: TextArea.Wrap
                         leftPadding: 16
                         rightPadding: 16
-                        topPadding: 0
-                        bottomPadding: 0
-                        verticalAlignment: Text.AlignVCenter
-                        onAccepted: sendMsg()
+                        topPadding: 10
+                        bottomPadding: 6
+                        Accessible.name: "消息输入框"
+                        Keys.onPressed: function(event) {
+                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                    && (event.modifiers & Qt.ShiftModifier) === 0) {
+                                sendMsg()
+                                event.accepted = true
+                            }
+                        }
                         onTextChanged: {
                             if (text.length > 0) appCore.setStatus("用户输入中...")
                             else appCore.setStatus("在线")
@@ -508,6 +578,43 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // jump to latest (NextChat/lobe-chat pattern): appears once the user
+    // scrolled away from the bottom, returns the view to the newest message
+    Rectangle {
+        id: jumpDown
+        width: 32; height: 32; radius: 16
+        anchors.right: parent.right
+        anchors.rightMargin: 16
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: inputBar.height + 10
+        opacity: !msgView.stickToBottom && msgView.count > 0 ? 1 : 0
+        scale: opacity > 0 ? 1 : 0.6
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack } }
+        color: Theme.cardFill
+        border.color: Theme.glassBorder
+        border.width: 1
+        Text {
+            anchors.centerIn: parent
+            text: "↓"
+            color: Theme.text
+            font.pixelSize: 16
+            font.bold: true
+        }
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                msgView.stickToBottom = true
+                msgView.positionViewAtEnd()
+            }
+        }
+        Accessible.name: "回到底部"
+        Accessible.role: Accessible.Button
     }
 
     // ts of the last message in the conversation (for gap detection)
@@ -541,7 +648,7 @@ Rectangle {
         var grouped = false
         if (msgModel.count > 0 && !msgModel.get(msgModel.count - 1).isAi)
             grouped = true
-        msgModel.append({ "isAi": false, "msg": t, "timeLabel": timeLabel, "grouped": grouped })
+        msgModel.append({ "isAi": false, "msg": t, "timeLabel": timeLabel, "grouped": grouped, "ts": now })
         Qt.callLater(function() { msgView.positionViewAtEnd() })
 
         chatPage.sendBuffer.push(gapPrefix + t)
@@ -607,7 +714,7 @@ Rectangle {
     // (no typing queue) AND persists to the chat DB so it appears in history
     function insertAiMessage(text) {
         if (!text || text.trim().length === 0) return
-        msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false })
+        msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false, "ts": Date.now() })
         Qt.callLater(function() { msgView.positionViewAtEnd() })
         try {
             var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()
@@ -637,6 +744,16 @@ Rectangle {
         replyBusy = true
         var item = replyQueue.shift()
         chatPage.pendingReply = item.text
+        // in-stream typing bubble (Telegram/WeChat style): a "..." placeholder
+        // that the reply REPLACES when the typing delay elapses. Consecutive
+        // parts of one reply group their avatars like any other AI message.
+        var grouped = msgModel.count > 0 && msgModel.get(msgModel.count - 1).isAi
+        msgModel.append({ "isAi": true, "msg": "...", "timeLabel": "", "grouped": grouped, "ts": Date.now() })
+        chatPage.typingRow = msgModel.count - 1
+        if (msgView.stickToBottom && !msgView.moving) {
+            Qt.callLater(function() { if (msgView) msgView.positionViewAtEnd() })
+            Qt.callLater(function() { Qt.callLater(function() { if (msgView && msgView.stickToBottom) msgView.positionViewAtEnd() }) })
+        }
         replyTimer.interval = item.ms
         replyTimer.start()
     }
@@ -646,10 +763,27 @@ Rectangle {
         repeat: false
         onTriggered: {
             replyBusy = false
-            // reveal this reply — no placeholder to fill, just append
+            // reveal this reply: the typing placeholder becomes the message in
+            // place (bubblePop plays on the text change). Fallback: append a
+            // fresh row if the placeholder row vanished (contact switch etc).
             var text = chatPage.pendingReply
-            msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false })
+            var revealed = false
+            if (chatPage.typingRow >= 0 && chatPage.typingRow < msgModel.count) {
+                var r = msgModel.get(chatPage.typingRow)
+                if (r.isAi && r.msg === "...") {
+                    msgModel.setProperty(chatPage.typingRow, "msg", text)
+                    msgModel.setProperty(chatPage.typingRow, "ts", Date.now())
+                    revealed = true
+                }
+            }
+            chatPage.typingRow = -1
+            if (!revealed)
+                msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false, "ts": Date.now() })
             Qt.callLater(function() { msgView.positionViewAtEnd() })
+            // reveal grew the bubble (wrapped text): follow once, only if the
+            // user stayed pinned and isn't actively dragging/scrolling
+            if (msgView.stickToBottom && !msgView.moving)
+                Qt.callLater(function() { if (msgView && msgView.stickToBottom) msgView.positionViewAtEnd() })
             // persistence (best-effort)
             try {
                 var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()
@@ -680,6 +814,8 @@ Rectangle {
     }
 
     property string pendingReply: ""
+    // model row currently showing the in-stream typing bubble ("...")
+    property int typingRow: -1
 
     // exposed: AI avatar image path (empty = char avatar)
     property string aiAvatarSource: ""
