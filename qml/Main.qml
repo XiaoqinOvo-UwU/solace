@@ -886,6 +886,8 @@ ApplicationWindow {
                 var ok = index === 0 ? proxyService.launchClash() : proxyService.launchV2ray()
                 islandToast.show(ok ? "已打开 " + which : "打开失败")
                 if (ok) statsService.record("proxy", which)
+            } else if (actionId === "update") {
+                if (index === 0) updateService.downloadAndInstall()
             }
         }
     }
@@ -893,6 +895,7 @@ ApplicationWindow {
     // chat page open state
     property bool chatOpen: false
     property bool appReady: false
+    property bool updatePrompted: false   // one island prompt per launch
 
     // unread badge for proactive AI messages
     property int unreadCount: 0
@@ -950,6 +953,26 @@ ApplicationWindow {
             locationWarnTimer.start()
         idleTimer.start()
         restTimer.start()
+        updateCheckTimer.start()   // auto-detect updates on every launch
+    }
+
+    // ---- auto update check (launch) ----
+    // Runs quietly; only surfaces an island prompt when a newer version exists.
+    Timer {
+        id: updateCheckTimer
+        interval: 8000
+        repeat: false
+        onTriggered: updateService.checkForUpdates()
+    }
+    Connections {
+        target: updateService
+        function onCheckFinished(available) {
+            if (!available || root.updatePrompted) return
+            root.updatePrompted = true
+            appCore.showIsland("发现新版本 " + updateService.latestVersion
+                               + "（当前 " + updateService.currentVersion() + "），要现在更新吗？",
+                               ["去更新", "稍后"], "update")
+        }
     }
 
     Timer {

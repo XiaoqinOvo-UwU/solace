@@ -71,10 +71,15 @@ Page {
     }
     function starFmt(n) { return !n ? "0" : (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n)) }
     function releaseStatus() {
+        // the real update check (UpdateService, api.github.com) wins
+        if (updateService.updateAvailable)
+            return "发现新版本 " + updateService.latestVersion
         var m = page.releaseTag.match(/v?\d+\.\d+\.\d+/)
-        if (!m) return "已是最新 v" + updateService.currentVersion()
-        var tag = m[0].charAt(0) === "v" ? m[0] : ("v" + m[0])
-        return tag === ("v" + updateService.currentVersion()) ? "已是最新" : ("发现新版本 " + tag)
+        if (m) {
+            var tag = m[0].charAt(0) === "v" ? m[0] : ("v" + m[0])
+            if (tag !== ("v" + updateService.currentVersion())) return "发现新版本 " + tag
+        }
+        return "已是最新 v" + updateService.currentVersion()
     }
     function openUrl(u) { if (u && u.length > 0) Qt.openUrlExternally(u) }
 
@@ -112,6 +117,7 @@ Page {
         aiService.generateDailyAdvice()
         refreshTrending()
         refreshChangelog()
+        updateService.checkForUpdates()   // refresh the 更新公告 status
     }
     onVisibleChanged: if (visible) refreshReport()
 
@@ -282,7 +288,12 @@ Page {
                         Layout.fillWidth: true
                         Text { text: "更新公告"; color: Theme.text; font.pixelSize: Theme.fsDefault; font.bold: true }
                         Item { Layout.fillWidth: true }
-                        Text { text: "›"; color: Theme.textDim; font.pixelSize: Theme.fsDefault }
+                        Text {
+                            text: updateService.updateAvailable ? "更新 ›" : "›"
+                            color: updateService.updateAvailable ? Theme.ok : Theme.textDim
+                            font.pixelSize: Theme.fsDefault
+                            font.bold: updateService.updateAvailable
+                        }
                     }
                     Text {
                         text: "当前 v" + updateService.currentVersion() + " · " + page.releaseStatus()
@@ -312,9 +323,14 @@ Page {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: page.openUrl(page.releaseUrl.length > 0
-                                            ? page.releaseUrl
-                                            : "https://github.com/XiaoqinOvo-UwU/xiaoqintools/releases")
+                    onClicked: {
+                        if (updateService.updateAvailable)
+                            updateService.downloadAndInstall()
+                        else
+                            page.openUrl(page.releaseUrl.length > 0
+                                         ? page.releaseUrl
+                                         : "https://github.com/XiaoqinOvo-UwU/xiaoqintools/releases")
+                    }
                 }
             }
 
