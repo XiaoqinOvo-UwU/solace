@@ -123,3 +123,23 @@ void NetworkService::nodeTestAsync()
     });
     watcher->setFuture(future);
 }
+
+// generic async JSON GET (home page cards). Tagged so one slot can serve
+// several sources; empty result signals a network/API error.
+void NetworkService::fetchJson(const QString &url, const QString &tag)
+{
+    if (!m_mgr)
+        m_mgr = new QNetworkAccessManager(this);
+    QNetworkRequest req{QUrl(url)};
+    req.setRawHeader("User-Agent", "XiaoQinTools");
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply *reply = m_mgr->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, tag]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit jsonReady(tag, QString());
+            return;
+        }
+        emit jsonReady(tag, QString::fromUtf8(reply->readAll()));
+    });
+}

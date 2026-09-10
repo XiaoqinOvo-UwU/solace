@@ -378,7 +378,7 @@ ApplicationWindow {
                     }
                     UserMenuItem {
                         text: "设 置"
-                        onClicked: pageStack.switchPage(3)
+                        onClicked: pageStack.switchPage(4)
                     }
                     UserMenuItem {
                         text: "导 出配置"
@@ -549,6 +549,7 @@ ApplicationWindow {
                 // ---- nav items (lower-middle) — continuous sidebar list ----
                 Repeater {
                     model: ListModel {
+                        ListElement { label: "主页" }
                         ListElement { label: "网络" }
                         ListElement { label: "系统" }
                         ListElement { label: "娱乐" }
@@ -768,6 +769,7 @@ ApplicationWindow {
                     }
                 }
 
+                HomePage {}
                 NetworkPage {}
                 SystemPage {}
                 EntertainmentPage {}
@@ -1024,7 +1026,7 @@ ApplicationWindow {
     property var nextProactiveAt: 0
 
     function scheduleNextProactive() {
-        var mins = 25 + Math.floor(Math.random() * 11) // 25..35 min
+        var mins = 15 + Math.floor(Math.random() * 11) // 15..25 min
         root.nextProactiveAt = Date.now() + mins * 60 * 1000
     }
 
@@ -1039,8 +1041,8 @@ ApplicationWindow {
         repeat: true
         onTriggered: {
             if (!root.nextProactiveAt) root.scheduleNextProactive()
-            // coding / busy foreground -> never interrupt (schedule holds)
-            if (aiService.userActivityState() === "coding") return
+            // DND (gaming / fullscreen / meeting) is decided inside idleChat;
+            // a foreground editor alone no longer blocks if the user is idle.
             if (Date.now() >= root.nextProactiveAt) {
                 root.scheduleNextProactive()
                 // feed the AI the last 3 chat messages so it can start a

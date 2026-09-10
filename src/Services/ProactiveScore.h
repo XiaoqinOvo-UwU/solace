@@ -16,7 +16,7 @@
 //   -30 user recently refused a chat
 //   -20 user is in a fullscreen app
 //
-//  below 50 -> do NOT proactively chat
+//  below 45 -> do NOT proactively chat
 // =====================================================================
 
 struct ProactiveInput
@@ -36,6 +36,6 @@ class ProactiveScore
 public:
     static int compute(const ProactiveInput &in);
 
-    // the spec's gate: below 50 -> stay quiet
-    static bool shouldProactivelyChat(const ProactiveInput &in) { return compute(in) >= 50; }
+    // the gate: below 45 -> stay quiet
+    static bool shouldProactivelyChat(const ProactiveInput &in) { return compute(in) >= 45; }
 };

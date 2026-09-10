@@ -28,6 +28,7 @@
         <file>../qml/Components/ProfileEditDialog.qml</file>
         <file>../qml/Components/AiProfileDialogs.qml</file>
         <file>../qml/Components/qmldir</file>
+        <file>../qml/Pages/HomePage.qml</file>
         <file>../qml/Pages/NetworkPage.qml</file>
         <file>../qml/Pages/SystemPage.qml</file>
         <file>../qml/Pages/EntertainmentPage.qml</file>

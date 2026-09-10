@@ -34,12 +34,9 @@ DoNotDisturbState DoNotDisturbManager::evaluate(const QString &fgCategory,
         s.reason = "fullscreen";
         return s;
     }
-    // 4) high-intensity work: coding / creating / terminal
-    if (fgCategory == "creating" || fgCategory == "terminal") {
-        s.enabled = true;
-        s.reason = "work";
-        return s;
-    }
+    // NOTE: foreground coding/terminal no longer hard-bans. A window that stays
+    // open doesn't mean the user is present; ProactiveScore's idle signal makes
+    // the call instead (gaming/fullscreen/meeting still block here).
 
     return s; // enabled stays false
 }

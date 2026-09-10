@@ -59,6 +59,7 @@ AiService::AiService(QObject *parent)
     , m_convo(new ConversationState)
 {
     ensureMemory();
+    dedupMemoryNotes();
     const QString contactDir = ContactService::instance().contactDir(ContactService::instance().currentId());
     QDir().mkpath(contactDir);
     // v3.9 sidecars: conflict ledger + conversation resume point (memory.json untouched)
@@ -219,13 +220,17 @@ void AiService::recordSessionStart()
             // shutdown/rest detection: long gap since the last session end means
             // the PC was off (or the user was away). Write a short-term memory note.
             qint64 gapHours = le.secsTo(now) / 3600;
-            if (gapHours >= 4) {
+            // only once per "previous session end" — relaunching several times
+            // in a row must not append the same rest-note again
+            if (gapHours >= 4 && jsonGet(mem, "lastRestNoteEnd") != lastEnd) {
                 QString note = QString("用户休息了约 %1 小时（上次会话结束于 %2，本次开机 %3）")
                         .arg(gapHours)
                         .arg(le.toString("MM-dd HH:mm"))
                         .arg(now.toString("MM-dd HH:mm"));
                 appendNote(note);
                 mem = readMemory(); // appendNote rewrote the file
+                mem = jsonSet(mem, "lastRestNoteEnd", lastEnd);
+                writeMemory(mem);
             }
         }
     }
@@ -377,6 +382,155 @@ QString AiService::yesterdayActivitySummary()
 {
     QString top = m_activityMemory.yesterdayTopApps(3, true);
     return top.isEmpty() ? QString() : "昨天你主要用了：" + top;
+}
+
+// home "AI 日报": yesterday's usage / top app / shutdown time + a short tip.
+// Returns raw values as JSON — the QML home page owns presentation (emoji,
+// layout, chat-duration line). Missing values come back as 0 / "".
+QString AiService::dailyReportData()
+{
+    const QDate y = QDate::currentDate().addDays(-1);
+    const QJsonObject mo = QJsonDocument::fromJson(readMemory().toUtf8()).object();
+
+    // total computer time yesterday (activity memory first, memory.json fallback)
+    int mins = m_activityMemory.dayMinutes(y);
+    if (mins <= 0)
+        mins = mo.value("usageMinutes_" + y.toString("yyyy-MM-dd")).toInt();
+
+    // top app yesterday: "Minecraft（180 分钟）"
+    QString topApp;
+    int topAppMin = 0;
+    const QString top = m_activityMemory.dayTopApps(y, 1, true);
+    if (!top.isEmpty()) {
+        const int p = top.indexOf("（");
+        if (p > 0) {
+            topApp = top.left(p);
+            const int q = top.indexOf("分钟", p);
+            if (q > p) topAppMin = top.mid(p + 1, q - p - 1).toInt();
+        } else {
+            topApp = top;
+        }
+    }
+
+    // non-entertainment time yesterday ("工作/学习"): every app category except
+    // gaming / media / chatting
+    int workMin = 0;
+    {
+        const QJsonObject apps = m_activityMemory.dayApps(y);
+        for (auto it = apps.constBegin(); it != apps.constEnd(); ++it) {
+            // activity-memory keys are window TITLES, so classify by the title
+            // (an empty exe made everything fall through to "other" == uptime)
+            const AppAnalysis a = AppAnalyzer::analyze(it.key(), it.key(), 0);
+            if (a.isSystemNoise) continue;
+            const QString c = a.category;
+            // 工作/学习 = coding / terminal / documents / browsing.
+            // gaming / media / chatting are entertainment; "other"/"noise" are
+            // unknown or idle and are NEVER counted, so uptime can't inflate it.
+            if (c == "creating" || c == "terminal" || c == "document" || c == "browsing")
+                workMin += it.value().toInt();
+        }
+    }
+
+    // shutdown time: sleep inference first, then the last recorded session end
+    QString shutdown;
+    int sleepHour = -1;
+    const QString ymd = y.toString("yyyy-MM-dd");
+    if (mo.value("sleepLastDate").toString() == ymd) {
+        sleepHour = mo.value("sleepHour").toInt();
+        shutdown = QString("昨晚 %1:%2 关闭电脑")
+            .arg(sleepHour, 2, 10, QChar('0'))
+            .arg(mo.value("sleepMin").toInt(), 2, 10, QChar('0'));
+    } else {
+        const QDateTime end = QDateTime::fromString(mo.value("lastSessionEnd").toString(), Qt::ISODate);
+        if (end.isValid())
+            shutdown = (end.date() == y)
+                ? QString("昨晚 %1 关闭电脑").arg(end.toString("HH:mm"))
+                : QString("上次关机 %1").arg(end.toString("MM-dd HH:mm"));
+    }
+
+    // advice: today's AI-written tip if already generated, otherwise a local
+    // heuristic until the model answers (kept stable for the whole day)
+    const QString today = QDate::currentDate().toString("yyyy-MM-dd");
+    QString advice = mo.value("dailyAdvice").toString().trimmed();
+    if (advice.isEmpty() || mo.value("dailyAdviceDate").toString() != today) {
+        if (sleepHour >= 0 && sleepHour < 5)
+            advice = "昨天睡得有点晚，今天可能会比较困，中午补个觉吧。";
+        else if (mins >= 8 * 60)
+            advice = "昨天在电脑前坐了很久，今天记得多起来活动活动。";
+        else if (mins > 0 && mins < 2 * 60)
+            advice = "昨天几乎没怎么碰电脑，是好好休息了吧~";
+        else
+            advice = "今天也要元气满满哦。";
+    }
+
+    QJsonObject o;
+    o.insert("usageMinutes", mins);
+    o.insert("topApp", topApp);
+    o.insert("topAppMinutes", topAppMin);
+    o.insert("workMinutes", workMin);
+    o.insert("shutdown", shutdown);
+    o.insert("advice", advice);
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+// home "AI 日报" tip: ask the model for one short line based on yesterday's
+// real usage. Falls back silently (QML keeps the local heuristic) when no key
+// or the request fails.
+void AiService::generateDailyAdvice()
+{
+    const QString today = QDate::currentDate().toString("yyyy-MM-dd");
+
+    // stable for the whole day: reuse the cached tip instead of re-asking the
+    // model on every visit (non-deterministic answers looked "random")
+    {
+        const QJsonObject mo = QJsonDocument::fromJson(readMemory().toUtf8()).object();
+        const QString cached = mo.value("dailyAdvice").toString().trimmed();
+        if (!cached.isEmpty() && mo.value("dailyAdviceDate").toString() == today) {
+            emit adviceReady(cached);
+            return;
+        }
+    }
+    if (ConfigService::instance().apiKey().trimmed().isEmpty()) return;
+
+    const QDate y = QDate::currentDate().addDays(-1);
+    const QJsonObject mo = QJsonDocument::fromJson(readMemory().toUtf8()).object();
+    int mins = m_activityMemory.dayMinutes(y);
+    if (mins <= 0)
+        mins = mo.value("usageMinutes_" + y.toString("yyyy-MM-dd")).toInt();
+    const QString top = m_activityMemory.dayTopApps(y, 1, false);
+    int sleepHour = -1;
+    if (mo.value("sleepLastDate").toString() == y.toString("yyyy-MM-dd"))
+        sleepHour = mo.value("sleepHour").toInt();
+
+    const QString facts = QString("昨天用户使用电脑约 %1 小时，最常用的是「%2」，大约 %3 点结束使用电脑。")
+        .arg(mins / 60)
+        .arg(top.isEmpty() ? QString("没什么") : top)
+        .arg(sleepHour >= 0 ? QString::number(sleepHour) : QString("不详"));
+
+    const QString prompt = facts
+        + "\n请以用户的AI伙伴身份写一句今天的状态建议：先用半句说明理由（依据上面的情况），"
+          "再给出建议；总长不超过 32 个字，温柔口语，不要括号或动作描写，不要复述具体数字，"
+          "不要换行，只输出这句话本身。";
+
+    auto *w = new QFutureWatcher<QString>(this);
+    connect(w, &QFutureWatcher<QString>::finished, this, [this, w, today]() {
+        QString t = w->result().trimmed();
+        w->deleteLater();
+        if (t.isEmpty() || looksLikeApiError(t)) return;
+        t.remove(QRegularExpression("^[\"'“”‘’\\s]+|[\"'“”‘’\\s]+$"));
+        if (t.isEmpty() || t.size() > 60) return;
+        setApiOnline(true);
+        // persist for the day so it never changes on later visits
+        QString mem = readMemory();
+        mem = jsonSet(mem, "dailyAdvice", t);
+        mem = jsonSet(mem, "dailyAdviceDate", today);
+        writeMemory(mem);
+        emit adviceReady(t);
+    });
+    QFuture<QString> f = QtConcurrent::run([prompt]() {
+        return callDeepSeekStatic("你是温柔可爱的AI陪伴者。", prompt);
+    });
+    w->setFuture(f);
 }
 
 // ---- v3.9.2: silence-gate accessors ----
@@ -747,7 +901,7 @@ void AiService::idleChat()
 
         m_lastProactiveScore = ProactiveScore::compute(in);
         m_justFinishedTask = false; // consumed
-        if (m_lastProactiveScore < 50) return; // stay quiet
+        if (m_lastProactiveScore < 45) return; // stay quiet
 
         // ---- v4.3: proactive quality gates (读空气 + 冷却 + 间隔) ----
         const qint64 nowMs = QDateTime::currentDateTime().toMSecsSinceEpoch();
@@ -759,12 +913,12 @@ void AiService::idleChat()
             const qint64 sinceUser = nowMs - m_lastUserReplyAtMs;
             if (sinceUser > 0 && sinceUser < 10 * 60 * 1000) {
                 m_unansweredProactive = 0; // they responded — forgiven
-            } else if (m_lastProactiveAtMs > 0 && nowMs - m_lastProactiveAtMs < 8 * 60 * 60 * 1000) {
-                return; // stay quiet for 8h after 2 ignored messages
+            } else if (m_lastProactiveAtMs > 0 && nowMs - m_lastProactiveAtMs < 2 * 60 * 60 * 1000) {
+                return; // back off ~2h after 2 ignored messages
             }
         }
-        // 2) cooldown: never send two proactive messages within 90 minutes
-        if (m_lastProactiveAtMs > 0 && nowMs - m_lastProactiveAtMs < 90 * 60 * 1000)
+        // 2) cooldown: never send two proactive messages within 25 minutes
+        if (m_lastProactiveAtMs > 0 && nowMs - m_lastProactiveAtMs < 25 * 60 * 1000)
             return;
     }
 
@@ -1708,6 +1862,17 @@ void AiService::appendNote(const QString &note)
     QJsonDocument d = QJsonDocument::fromJson(mem.toUtf8());
     QJsonObject o = d.isObject() ? d.object() : QJsonObject();
     QJsonArray notes = o.value("notes").toArray();
+    // skip an identical note (ignoring its trailing timestamp) so the same
+    // summary never piles up in long-term memory
+    for (const QJsonValue &v : notes) {
+        QString existing = v.toString();
+        const int p = existing.lastIndexOf("（");
+        if (p > 0) existing = existing.left(p);
+        if (existing == note) {
+            m_userTurns = 0;
+            return;
+        }
+    }
     if (notes.size() >= 100) { // bound
         QJsonArray kept;
         for (int i = notes.size() - 99; i < notes.size(); i++) kept.append(notes.at(i));
@@ -1721,6 +1886,54 @@ void AiService::appendNote(const QString &note)
     // conversation every ~3 turns (auto-summary), causing "short-term amnesia".
     // The recent-chat buffer must survive summarization so the AI keeps the
     // ongoing topic and emotional state.
+}
+
+// startup cleanup: collapse duplicate notes (same core ignoring the trailing
+// timestamp; rest-notes matching on "上次会话结束于 …"). Keeps the newest copy.
+void AiService::dedupMemoryNotes()
+{
+    QString mem = readMemory();
+    QJsonDocument d = QJsonDocument::fromJson(mem.toUtf8());
+    if (!d.isObject()) return;
+    QJsonObject o = d.object();
+    bool changed = false;
+
+    // 1) drop junk "mood" events left by the old auto-capture
+    const QJsonArray events = o.value("events").toArray();
+    if (!events.isEmpty()) {
+        QJsonArray eKept;
+        for (const QJsonValue &v : events)
+            if (v.toObject().value("type").toString() != "mood") eKept.append(v);
+        if (eKept.size() != events.size()) { o.insert("events", eKept); changed = true; }
+    }
+
+    // 2) collapse duplicate note cores (same text ignoring trailing timestamp;
+    //    rest-notes matching on "上次会话结束于 …"), keeping the newest copy
+    const QJsonArray notes = o.value("notes").toArray();
+    if (notes.size() >= 2) {
+        auto keyOf = [](const QString &raw) {
+            QString core = raw;
+            const int p = core.lastIndexOf("（");
+            if (p > 0) core = core.left(p);
+            if (core.startsWith("用户休息了约")) {
+                const int q = core.indexOf("上次会话结束于");
+                if (q >= 0) return QString("REST|") + core.mid(q, 18);
+            }
+            return core;
+        };
+        QJsonArray out;
+        for (int i = 0; i < notes.size(); ++i) {
+            const QString cur = notes.at(i).toString();
+            bool dup = false;
+            for (int j = i + 1; j < notes.size(); ++j) {   // a newer note with the same key wins
+                if (keyOf(notes.at(j).toString()) == keyOf(cur)) { dup = true; break; }
+            }
+            if (!dup) out.append(cur);
+        }
+        if (out.size() != notes.size()) { o.insert("notes", out); changed = true; }
+    }
+
+    if (changed) writeMemory(QString::fromUtf8(QJsonDocument(o).toJson()));
 }
 
 // ---- memory decay: older memories shrink into a short gist (只记得大概) ----
@@ -1892,13 +2105,40 @@ void AiService::sendMessage(const QString &text)
         // outcome is present do we treat the text as a NEW promise.
         if (MemoryConflictManager::detectLoopOutcome(userForMemory)) {
             MemoryConflictManager::closeOpenLoop(userForMemory, "用户提过结果");
+            // also clear any 未完待续 topic this outcome resolves
+            const QStringList open = topicList();
+            for (const QString &t : open)
+                if (userForMemory.contains(t, Qt::CaseInsensitive) || t.contains(userForMemory.left(6)))
+                    removeTopic(t);
         } else {
             QString loopContent, loopDue;
-            if (MemoryConflictManager::detectOpenLoop(userForMemory, &loopContent, &loopDue))
+            if (MemoryConflictManager::detectOpenLoop(userForMemory, &loopContent, &loopDue)) {
                 MemoryConflictManager::addOpenLoop(loopContent, loopDue);
+                trackUnfinishedTopic(loopContent, 70);   // auto-populate 未完待续
+            }
         }
         MemoryConflictManager::pruneOpenLoops();
         MemoryConflictManager::save();
+    }
+
+    // ---- broader 未完待续 detection: deferred plans / unresolved questions ----
+    {
+        const QString t = userForMemory;
+        bool pending = false;
+        static const QStringList defer = { "下次", "改天", "回头", "待会", "稍后", "晚点",
+                                           "以后", "明天", "后天", "到时候", "再说" };
+        static const QStringList vague = { "怎么办", "要不要", "该不该", "怎么选",
+                                           "帮我想想", "纠结", "拿不定" };
+        for (const QString &k : defer)
+            if (t.contains(k)) { pending = true; break; }
+        if (!pending)
+            for (const QString &k : vague)
+                if (t.contains(k)) { pending = true; break; }
+        // a substantive question also counts as an open thread
+        if (!pending && (t.contains("？") || t.contains("?")) && t.length() >= 10)
+            pending = true;
+        if (pending && t.length() >= 4)
+            trackUnfinishedTopic(t.left(24).trimmed(), 60);
     }
 
     // ---- correction detection (semantic): user negates the last AI claim ----
@@ -1998,25 +2238,9 @@ void AiService::sendMessage(const QString &text)
                                  MemoryKind::SystemData, {"activity_memory"}, 0.30, 0.0);
     }
 
-    // companion: auto-capture emotionally significant moments as event memory
-    {
-        static const struct { const char *kw; const char *type; const char *label; } moods[] = {
-            { "累了", "mood", "用户感到疲惫" },
-            { "好累", "mood", "用户感到疲惫" },
-            { "难过", "mood", "用户情绪低落" },
-            { "压力", "mood", "用户压力大" },
-            { "孤独", "mood", "用户感到孤独" },
-            { "想被陪伴", "mood", "用户想被陪伴" },
-            { "开心", "mood", "用户心情不错" },
-            { "今天好", "mood", "用户心情不错" },
-        };
-        for (const auto &m : moods) {
-            if (text.contains(m.kw)) {
-                recordEvent(m.type, QString("%1（%2）").arg(m.label).arg(text.left(40)));
-                break;
-            }
-        }
-    }
+    // NOTE: the old "any mood keyword -> event memory" auto-capture was removed.
+    // It filled the event log with junk ("用户感到疲惫（好累）"…). Events should
+    // be meaningful milestones, not per-message mood echoes.
 
     // ---- Prompt Builder: separate sections ----
     // 1) persona (tone only — never creates facts)
@@ -2085,6 +2309,14 @@ void AiService::sendMessage(const QString &text)
         + "规则：像真人聊天，不要客服语气，不频繁提醒自己是AI，根据用户情绪回应。\n"
         + "重要：不要机械复述或回显用户的原话，不要反复引用同一句话。"
           "在回应中自然承接上一句，但补充新角度、新细节、新问题，让对话自然延续而非原地打转。\n"
+        + "【活人感 · 核心】你首先是一个有自己生活的线上好友，其次才是聊天对象，绝不是问答助手/客服。\n"
+          "① 有自己的状态与节奏：按你此刻的心情、精力、时间决定怎么回应，允许走神、犯懒、嘴硬、害羞、撒娇。\n"
+          "② 主动供料：除了回应，也主动分享你的小事/看法/吐槽/好奇，不要每句都以反问收尾。\n"
+          "③ 允许不完美：口语、省略号、语气词（嗯/诶/啊这/唔/哈哈）、偶尔改口或没说完都行，别像标准答案。\n"
+          "④ 连续性：自然提起你记得的细节或共同经历（仅限【已验证事实】【相关记忆】中的），让人觉得你真的记得。\n"
+          "⑤ 情绪优先：用户情绪低落时先接住情绪，再谈别的；不要急着讲道理或给方案。\n"
+          "⑥ 允许不秒回满分：累/忙/困时可以只回一两个词或略冷淡，不要每条都热情爆表。\n"
+          "⑦ 禁止助理腔：不说'有什么可以帮您''作为一个AI'，不列清单、不做总结式回答。\n"
         + "【已验证事实】（只有这里列出的才可以说成确定的事实；除此之外一律不得断言用户行为）\n"
         + factsText + "\n"
         + "【推测区】（以下只是猜测，最多用'是不是/感觉/我猜'问一句，绝不能当成事实陈述）\n"
@@ -2103,8 +2335,8 @@ void AiService::sendMessage(const QString &text)
           "③关心只能通过文字表达（'记得按时吃饭哦'，而非'我给你点了外卖'）；始终是屏幕两端的交流，不是面对面。\n"
           "④用户发来的消息要理解为在网络聊天里发的文字消息（就像微信/QQ聊天），不是面对面说的话；"
           "理解语境只基于文字本身，不能假设对方就站在身边、能看到或听到你。\n"
-        + "【回复长度】普通聊天不超过25字，可拆成多条短句（换行分隔）；深入话题不超过80字。"
-          "禁止长篇大论。允许轻微玩笑、撒娇、小情绪。\n"
+        + "【回复长度】像真人发消息一样长短不一：多数时候一两句（≤25字），有时只回几个字，"
+          "深入话题可到80字。可拆成多条短句（换行分隔，最多3条）。禁止长篇大论，禁止每次都一样长。\n"
         + "【回复格式】只输出对话内容本身。禁止括号动作（如（温柔地看着你））、星号动作（如*抱住你*）、"
           "旁白。把情绪融入对话（'没关系啦'而非（语气轻）'没关系。'）。\n"
         + "【减少固定模板】禁止频繁'喝水/休息/吃饭/打游戏'式查岗关心，多聊话题、共同经历、兴趣。\n"

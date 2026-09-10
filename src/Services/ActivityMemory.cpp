@@ -81,6 +81,11 @@ int ActivityMemory::dayMinutes(const QDate &d) const
     return dayObj(d).value("minutes").toInt();
 }
 
+QJsonObject ActivityMemory::dayApps(const QDate &d) const
+{
+    return dayObj(d).value("apps").toObject();
+}
+
 QString ActivityMemory::dayTopApps(const QDate &d, int n, bool withMinutes) const
 {
     QJsonObject apps = dayObj(d).value("apps").toObject();

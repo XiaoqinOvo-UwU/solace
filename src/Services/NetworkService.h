@@ -2,6 +2,8 @@
 #include <QObject>
 #include <QString>
 
+class QNetworkAccessManager;
+
 // Ported from XiaoQinV2rayHelper: node speed test, network speed test, proxy self-diagnosis.
 // All slow operations run on a background thread and report back via signals,
 // so the QML/UI thread never blocks.
@@ -22,6 +24,14 @@ public:
     Q_INVOKABLE void diagnoseAsync();
     Q_INVOKABLE void nodeTestAsync();
 
+    // generic async JSON GET (home page: GitHub trending / latest release).
+    // returns immediately; emits jsonReady(tag, <body or empty on error>).
+    Q_INVOKABLE void fetchJson(const QString &url, const QString &tag);
+
 signals:
     void result(QString text);
+    void jsonReady(QString tag, QString json);
+
+private:
+    QNetworkAccessManager *m_mgr = nullptr;
 };

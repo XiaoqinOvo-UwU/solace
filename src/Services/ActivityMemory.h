@@ -24,6 +24,7 @@ public:
     void setUptime(const QString &uptimeText);              // store today's boot uptime
 
     int    dayMinutes(const QDate &d) const;
+    QJsonObject dayApps(const QDate &d) const;              // { appKey: minutes } for a day
     QString dayTopApps(const QDate &d, int n, bool withMinutes) const;
     QString todayTopApps(int n, bool withMinutes) const;
     QString yesterdayTopApps(int n, bool withMinutes) const;

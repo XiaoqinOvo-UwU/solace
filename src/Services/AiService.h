@@ -165,6 +165,8 @@ public:
     Q_INVOKABLE QString longestRunningAppToday();      // top-used app today (excl. proxy/explorer/system)
     Q_INVOKABLE QString currentForegroundSessionText();// "你正在使用 X，已经用了约 Y 分钟"
     Q_INVOKABLE QString yesterdayActivitySummary();    // yesterday's archived top apps (with minutes)
+    Q_INVOKABLE QString dailyReportData();             // home "AI 日报" raw values (JSON: usage/topApp/shutdown/advice)
+    Q_INVOKABLE void generateDailyAdvice();            // async: AI writes today's one-line tip -> adviceReady
 
     // ---- batch 5: silence / proactive gates (v3.9.2) ----
     Q_INVOKABLE bool isDoNotDisturb();                 // proactive chat banned right now
@@ -180,6 +182,7 @@ public:
 
 signals:
     void chatReply(QString text);
+    void adviceReady(QString text);          // home daily-report tip (AI-generated)
     void apiStatusChanged();                 // API reachability changed -> presence dot
     void idleReply(QString text);            // AI initiated a chat on its own (proactive)
     void thinkingReady(QString text);
@@ -206,6 +209,7 @@ private:
     void trackChatTurn(const QString &userText, const QString &aiReply);
     void maybeSummarize();
     void appendNote(const QString &note);
+    void dedupMemoryNotes();   // drop duplicate note cores on startup
     QStringList m_chatBuffer;   // recent turns (user/ai pairs), bounded
     int m_userTurns = 0;        // user messages since last summary
     bool m_summarizing = false;
