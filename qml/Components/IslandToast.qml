@@ -9,12 +9,17 @@ import QtQuick.Layouts
 // Modes:
 //   show(msg, duration)          plain notification
 //   showChoice(msg, options)     choice toast with buttons -> actionChosen(index)
+//                                Esc dismisses; focus lands on the first button
+//                                (no keyboard trap)
 //
-// Motion (per UI skill group): fade + scale spring, exit FASTER than enter,
-// using transform/opacity only. Focus rings on choice buttons (a11y).
+// Motion (motion-design, Premium archetype): fade + scale + slide, exit faster
+// than enter, transform/opacity only. Re-entry during the exit animation is
+// safe: present() stops animOut, dismiss() stops bounce — a stale
+// onFinished can never kill a freshly shown toast.
 Rectangle {
     id: island
     visible: false
+
     // dynamic width: the island SHRINKS/GROWS with the text (and the choice
     // buttons when present), capped at 440px. Width changes animate smoothly.
     //
@@ -28,10 +33,10 @@ Rectangle {
     // text-only: height follows content with symmetric padding (min 48) and the
     // text fills+vertically centers, so the text sits EXACTLY in the pill middle.
     // choice: fixed 88, label above buttons.
-    height: choiceRow.visible ? 88 : Math.max(48, text.implicitHeight + 32)
+    height: choiceRow.visible ? 88 : Math.max(48, label.implicitHeight + 32)
     radius: height / 2
     color: "#1C1C20"
-    border.color: Qt.rgba(255,255,255,0.10)
+    border.color: Qt.rgba(255, 255, 255, 0.10)
     border.width: 1
     Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
@@ -40,6 +45,7 @@ Rectangle {
     Text {
         id: measureText
         visible: false
+        Accessible.ignored: true
         text: island.message
         font.pixelSize: Theme.fsBody
     }
@@ -48,6 +54,14 @@ Rectangle {
     property string message: ""
     property var options: []
     signal actionChosen(int index)
+
+    // screen-reader surface: a toast is a transient alert
+    Accessible.role: Accessible.Alert
+    Accessible.name: island.message
+
+    // Esc closes the island; from a focused choice button the key propagates
+    // up here, so choice mode always has a keyboard exit
+    Keys.onEscapePressed: island.dismiss()
 
     // ---- plain notification ----
     function show(msg, duration) {
@@ -66,18 +80,28 @@ Rectangle {
 
     function dismiss() {
         hideTimer.stop()
+        bounce.stop()
+        island.active = false
         animOut.start()
     }
 
     function present(durationMs) {
+        // a toast shown during the exit animation must survive the stale
+        // animOut.onFinished — stop it first
+        animOut.stop()
         visible = true
+        island.active = true
         opacity = 0
-        scale = 0.82
+        scale = 0.84
         anchors.topMargin = 14
         bounce.restart()
         if (durationMs > 0) {
             hideTimer.interval = durationMs
             hideTimer.restart()
+        }
+        if (island.options.length > 0) {
+            var first = choiceRepeater.itemAt(0)
+            if (first) first.forceActiveFocus()
         }
     }
 
@@ -90,7 +114,7 @@ Rectangle {
         spacing: 0
 
         Text {
-            id: text
+            id: label
             Layout.fillWidth: true
             Layout.fillHeight: island.options.length === 0
             Layout.alignment: Qt.AlignHCenter
@@ -112,6 +136,7 @@ Rectangle {
             spacing: 8
 
             Repeater {
+                id: choiceRepeater
                 model: island.options
                 delegate: Button {
                     id: choiceBtn
@@ -121,7 +146,15 @@ Rectangle {
                     font.pixelSize: Theme.fsSmall
                     focusPolicy: Qt.StrongFocus
 
-                    readonly property int contentW: Math.ceil(choiceBtn.text.length * choiceBtn.font.pixelSize)
+                    // natural text width via hidden unconstrained Text —
+                    // length*pixelSize overestimates latin text badly
+                    readonly property int contentW: btnMeasure.implicitWidth
+                    Text {
+                        id: btnMeasure
+                        visible: false
+                        text: choiceBtn.text
+                        font.pixelSize: choiceBtn.font.pixelSize
+                    }
 
                     contentItem: Text {
                         text: choiceBtn.text
@@ -135,7 +168,7 @@ Rectangle {
                         color: choiceBtn.down ? "#3A4656"
                              : choiceBtn.hovered ? "#2C3644"
                              : "#242E3C"
-                        border.color: Qt.rgba(255,255,255,0.12)
+                        border.color: Qt.rgba(255, 255, 255, 0.12)
                         border.width: 1
                         Behavior on color { ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutCubic } }
 
@@ -151,6 +184,9 @@ Rectangle {
                         }
                     }
                     onClicked: {
+                        // one shot: ignore clicks during the exit animation
+                        if (!island.active) return
+                        island.active = false
                         island.actionChosen(index)
                         island.dismiss()
                     }
@@ -159,8 +195,8 @@ Rectangle {
         }
     }
 
-    // enter: SAME style as exit, just reversed — fade + shrink-to-place +
-    // slide down into position (no springy overshoot bounce).
+    // enter: fade + shrink-to-place + slide down into position (no springy
+    // overshoot bounce — Premium profile, 0% overshoot)
     ParallelAnimation {
         id: bounce
         NumberAnimation { target: island; property: "opacity"; from: 0; to: 1; duration: 200; easing.type: Easing.OutQuad }

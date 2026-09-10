@@ -51,6 +51,7 @@ static void writeReflection(const QString &text);
 static QString unfinishedPath();
 static QString interestPath();
 static QJsonObject readRelationship();
+static bool looksLikeApiError(const QString &s);
 
 AiService::AiService(QObject *parent)
     : QObject(parent)
@@ -855,6 +856,7 @@ void AiService::idleChat()
         m_lastProactiveAtMs = QDateTime::currentDateTime().toMSecsSinceEpoch();
         m_unansweredProactive++;
         // both: show in chat, and flag as a proactive (idle) message
+        setApiOnline(!looksLikeApiError(text));
         emit chatReply(text);
         emit idleReply(text);
         watcher->deleteLater();
@@ -1092,9 +1094,29 @@ QString AiService::aiAvatarPath() { return ContactService::instance().currentAva
 QString AiService::apiBaseUrl() { return ConfigService::instance().baseUrl(); }
 QString AiService::apiModel() { return ConfigService::instance().model(); }
 QString AiService::apiKey() { return ConfigService::instance().apiKey(); }
-void AiService::setApiBaseUrl(const QString &v) { ConfigService::instance().setBaseUrl(v); }
+void AiService::setApiBaseUrl(const QString &v) { ConfigService::instance().setBaseUrl(v); m_apiOnline = true; emit apiStatusChanged(); }
 void AiService::setApiModel(const QString &v) { ConfigService::instance().setModel(v); }
-void AiService::setApiKey(const QString &v) { ConfigService::instance().setApiKey(v); }
+void AiService::setApiKey(const QString &v) { ConfigService::instance().setApiKey(v); m_apiOnline = true; emit apiStatusChanged(); }
+
+// presence: "offline" until the user fills in an API key, or after a request
+// fails (bad key / dead endpoint / network down)
+bool AiService::apiConfigured()
+{
+    return !ConfigService::instance().apiKey().trimmed().isEmpty()
+        && !ConfigService::instance().baseUrl().trimmed().isEmpty();
+}
+
+bool AiService::apiOnline()
+{
+    return apiConfigured() && m_apiOnline;
+}
+
+void AiService::setApiOnline(bool v)
+{
+    if (m_apiOnline == v) return;
+    m_apiOnline = v;
+    emit apiStatusChanged();
+}
 QString AiService::apiKeyFor(const QString &baseUrl) { return ConfigService::instance().apiKeyFor(baseUrl); }
 void AiService::rememberApiKeyFor(const QString &baseUrl, const QString &key) { ConfigService::instance().rememberApiKeyFor(baseUrl, key); }
 QString AiService::customBaseUrl() { return ConfigService::instance().customBaseUrl(); }
@@ -2206,12 +2228,23 @@ void AiService::sendMessage(const QString &text)
     watcher->setFuture(future);
 }
 
+// the exact error strings callDeepSeek* returns when the endpoint is unusable
+static bool looksLikeApiError(const QString &s)
+{
+    return s.contains("还没配置 API Key") || s.contains("请求超时")
+        || s.contains("请求出错") || s.contains("服务器返回错误")
+        || s.contains("没有回复内容") || s.contains("空回复");
+}
+
 // ---- v4.3: shared post-reply pipeline ----
 // Replays emotion tokens, integrates PAD state, emits chatReply and runs
 // memory/interest tracking. Used by BOTH the single-pass path and the
 // double-pass persona-overlay path so behaviour stays identical.
 void AiService::deliverReply(const QString &speechIn, const QString &userText, const QString &emotion)
 {
+    // presence: a failed request means the endpoint is not usable right now
+    setApiOnline(!looksLikeApiError(speechIn));
+
     QString speech = speechIn;
     if (speech.isEmpty())
         speech = "（我没想好说什么…）";   // never restore raw — it may contain

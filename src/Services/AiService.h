@@ -24,6 +24,8 @@ public:
     Q_INVOKABLE bool shouldGreetToday();     // only greet on the first launch of the day
     Q_INVOKABLE void markGreeted();          // record today as greeted
     Q_INVOKABLE void sendMessage(const QString &text); // async chat -> chatReply
+    Q_INVOKABLE bool apiConfigured();        // api key + base url are filled in
+    Q_INVOKABLE bool apiOnline();            // configured and the last request succeeded
     Q_INVOKABLE void setChatHistory(const QString &history); // seed recent-chat context (from UI/SQLite)
     Q_INVOKABLE QString memoryReport();      // what the AI remembers (for settings/tests)
     Q_INVOKABLE QString uptimeText();        // how long the PC has been on
@@ -178,6 +180,7 @@ public:
 
 signals:
     void chatReply(QString text);
+    void apiStatusChanged();                 // API reachability changed -> presence dot
     void idleReply(QString text);            // AI initiated a chat on its own (proactive)
     void thinkingReady(QString text);
     void greetingReady(QString text);
@@ -195,6 +198,9 @@ private:
     static QString callDeepSeekMessages(const QJsonArray &messages);
     QString jsonGet(const QString &json, const QString &key);
     QString jsonSet(const QString &json, const QString &key, const QString &value);
+
+    bool m_apiOnline = true;        // optimistic; flips false on a failed request
+    void setApiOnline(bool v);
 
     // auto memory: after N user turns, summarize the recent chat into a short note
     void trackChatTurn(const QString &userText, const QString &aiReply);

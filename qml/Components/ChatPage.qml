@@ -58,18 +58,21 @@ Rectangle {
                 if (ts > 0 && prevTs > 0 && (ts - prevTs) > chatPage.gapThresholdMs)
                     timeLabel = fmtTime(ts)
                 if (ts > 0) prevTs = ts
-                msgModel.append({ "isAi": isAi, "msg": msg, "timeLabel": timeLabel, "grouped": false, "ts": ts })
+                msgModel.append({ "isAi": isAi, "msg": msg, "timeLabel": timeLabel, "grouped": false, "ts": ts, "receipt": "" })
                 hist.push((isAi ? aiService.aiName() : (aiService.userName() || "用户")) + ": " + msg)
             }
             chatPage.lastMsgTs = prevTs
             chatPage.typingRow = -1
+            chatPage.pendingReadRows = []
+            chatPage.pendingSendText = ""
             // seed AI context with this conversation so it can see past messages
             aiService.setChatHistory(hist.join("\n"))
         })
         // if this contact has no history yet, show a greeting bubble
         if (msgModel.count === 0)
-            msgModel.append({ "isAi": true, "msg": "你好，我是" + aiService.aiName() + "。", "timeLabel": "", "grouped": false, "ts": Date.now() })
-        Qt.callLater(function() { msgView.positionViewAtEnd() })
+            msgModel.append({ "isAi": true, "msg": "你好，我是" + aiService.aiName() + "。", "timeLabel": "", "grouped": false, "ts": Date.now(), "receipt": "" })
+        msgView.atBottom = true
+        Qt.callLater(function() { if (msgView) msgView.pinBottom() })
     }
 
     function saveMsg(contactId, isAi, msg, ts) {
@@ -105,6 +108,7 @@ Rectangle {
                 currentContactId = cid
                 loadChat(cid)
             }
+            chatPage.refreshApiStatus()
         } else {
             // reset so the next open always starts from the left
             x = -width
@@ -293,22 +297,44 @@ Rectangle {
             clip: true
             spacing: 8
             model: msgModel
-            // track whether the user is pinned to the bottom (so we don't yank
-            // the view away while they scroll up through history).
-            // NOTE: deliberately NO positionViewAtEnd here or on contentHeight/
-            // count changes — pinning on ANY contentHeight change feeds back
-            // into delegate churn, which changes contentHeight again: a
-            // never-converging loop that yanks the user back to the bottom.
-            // Real appends pin explicitly at their call sites instead.
-            property bool stickToBottom: true
-            onContentYChanged: {
-                // if user scrolled away from bottom, stop auto-following
-                var dist = contentHeight - contentY - height
-                stickToBottom = dist <= 40
+            // ---- bottom-following -------------------------------------------
+            // atBottom: true when the viewport is (near) the end of the list.
+            // Drives the "↓" jump button and auto-follow. Recomputed from
+            // contentY, so it tracks wheel and programmatic scroll alike. The
+            // epsilon is generous so the button doesn't linger at the end.
+            property bool atBottom: true
+            // small epsilon: leaving the very end by a few px already stops
+            // following, so a scroll-up is never yanked back
+            readonly property real bottomEpsilon: 8
+
+            function recomputeAtBottom() {
+                atBottom = contentHeight <= height + bottomEpsilon
+                        || (contentY + height) >= (contentHeight - bottomEpsilon)
+            }
+
+            // jump to the newest message and resume following
+            function pinBottom() {
+                atBottom = true
+                positionViewAtEnd()
+            }
+
+            onContentYChanged: recomputeAtBottom()
+            onMovementEnded: recomputeAtBottom()
+            // follow content that grows while the user is parked at the very
+            // end (typing placeholder -> wrapped text, new bubble). atBottom is
+            // kept accurate by the 8px epsilon in recomputeAtBottom, so a
+            // scroll-up flips it false on the first frame and is never pulled
+            // back; the inner re-check covers the gap before callLater runs.
+            onContentHeightChanged: {
+                if (atBottom) {
+                    positionViewAtEnd()
+                    Qt.callLater(function() { if (msgView.atBottom) msgView.positionViewAtEnd() })
+                }
             }
             delegate: Item {
                 id: delegateRoot
                 width: msgView.width
+                readonly property bool showReceipt: !model.isAi && model.receipt === "已读"
                 height: Math.max(44, bubbleRow.height)
                        + (model.timeLabel.length > 0 ? 30 : (model.grouped ? 4 : 14))
 
@@ -413,6 +439,19 @@ Rectangle {
                     // height change feeds the churn→pin→churn loop that yanks
                     // the user back to the bottom. Follow-ups happen explicitly
                     // in replyTimer where real content changes.
+
+                    // read receipt: sits just before (left of) the sent bubble,
+                    // bottom-aligned so it clears the hover timestamp/copy pill
+                    Text {
+                        visible: delegateRoot.showReceipt
+                        text: "已读"
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fsCaption
+                        anchors.right: bubble.left
+                        anchors.rightMargin: 6
+                        anchors.bottom: bubble.bottom
+                        anchors.bottomMargin: 1
+                    }
 
                     // hover affordances (Telegram/lobe-chat style): timestamp +
                     // copy pill float outside the bubble, in the margin every
@@ -589,7 +628,7 @@ Rectangle {
         anchors.rightMargin: 16
         anchors.bottom: parent.bottom
         anchors.bottomMargin: inputBar.height + 10
-        opacity: !msgView.stickToBottom && msgView.count > 0 ? 1 : 0
+        opacity: !msgView.atBottom && msgView.count > 0 ? 1 : 0
         scale: opacity > 0 ? 1 : 0.6
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -608,10 +647,7 @@ Rectangle {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: {
-                msgView.stickToBottom = true
-                msgView.positionViewAtEnd()
-            }
+            onClicked: msgView.pinBottom()
         }
         Accessible.name: "回到底部"
         Accessible.role: Accessible.Button
@@ -648,8 +684,10 @@ Rectangle {
         var grouped = false
         if (msgModel.count > 0 && !msgModel.get(msgModel.count - 1).isAi)
             grouped = true
-        msgModel.append({ "isAi": false, "msg": t, "timeLabel": timeLabel, "grouped": grouped, "ts": now })
-        Qt.callLater(function() { msgView.positionViewAtEnd() })
+        // sending always jumps to the newest message and resumes following
+        msgView.atBottom = true
+        msgModel.append({ "isAi": false, "msg": t, "timeLabel": timeLabel, "grouped": grouped, "ts": now, "receipt": "" })
+        chatPage.pendingReadRows.push(msgModel.count - 1)
 
         chatPage.sendBuffer.push(gapPrefix + t)
         // persistence is best-effort; never let it break the chat
@@ -672,8 +710,7 @@ Rectangle {
             return
         }
         chatPage.aiBusy = true
-        setHeaderStatus(aiService.aiName() + " 正在输入...")
-        aiService.sendMessage(merged)
+        chatPage.beginRead(merged)
     }
 
     Timer {
@@ -683,10 +720,75 @@ Rectangle {
         onTriggered: chatPage.fireSend()
     }
 
+    // read receipt: the AI "reads" the batch after a human reading interval
+    // (scales with length), marks the sent bubbles 已读, waits a beat, then
+    // switches to 正在输入 and finally requests the reply.
+    function beginRead(merged) {
+        chatPage.pendingSendText = merged
+        var ms = Math.max(600, Math.min(400 + merged.length * 30, 2000))
+        readTimer.interval = ms
+        readTimer.start()
+    }
+
+    Timer {
+        id: readTimer
+        repeat: false
+        onTriggered: {
+            chatPage.markMessagesRead()
+            typingTimer.start()
+        }
+    }
+
+    Timer {
+        id: typingTimer
+        interval: 450          // brief beat so 已读 is seen before 正在输入
+        repeat: false
+        onTriggered: {
+            setHeaderStatus(aiService.aiName() + " 正在输入...")
+            var m = chatPage.pendingSendText
+            chatPage.pendingSendText = ""
+            if (m.length > 0) aiService.sendMessage(m)
+        }
+    }
+
+    function markMessagesRead() {
+        var rows = chatPage.pendingReadRows
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i]
+            if (r >= 0 && r < msgModel.count && !msgModel.get(r).isAi)
+                msgModel.setProperty(r, "receipt", "已读")
+        }
+        chatPage.pendingReadRows = []
+    }
+
+    // a "已读" receipt only means the AI has read the message; once the reply
+    // is delivered it is stale, so drop it from every sent bubble
+    function clearReceipts() {
+        for (var i = 0; i < msgModel.count; i++) {
+            if (!msgModel.get(i).isAi && msgModel.get(i).receipt === "已读")
+                msgModel.setProperty(i, "receipt", "")
+        }
+    }
+
     function setHeaderStatus(s) {
+        // offline presence always wins over transient chat states
+        if (chatPage.apiOffline && s !== "离线") return
         headerStatus.text = s
-        headerStatus.color = (s === "在线") ? Theme.ok : Theme.warn
+        headerStatus.color = (s === "在线") ? Theme.ok
+                           : (s === "离线") ? Theme.textDim
+                           : Theme.warn
         statusDot.color = headerStatus.color
+    }
+
+    // presence: no API key filled in, or the endpoint did not answer -> 离线
+    property bool apiOffline: false
+    function refreshApiStatus() {
+        var offline = !aiService.apiConfigured() || !aiService.apiOnline()
+        chatPage.apiOffline = offline
+        if (offline)
+            chatPage.setHeaderStatus("离线")
+        else if (headerStatus.text === "离线")
+            chatPage.setHeaderStatus("在线")
     }
 
     // human-like reply delay: wait "typing time" proportional to text length,
@@ -714,8 +816,8 @@ Rectangle {
     // (no typing queue) AND persists to the chat DB so it appears in history
     function insertAiMessage(text) {
         if (!text || text.trim().length === 0) return
-        msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false, "ts": Date.now() })
-        Qt.callLater(function() { msgView.positionViewAtEnd() })
+        chatPage.clearReceipts()
+        msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false, "ts": Date.now(), "receipt": "" })
         try {
             var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()
             if (cid.length > 0) {
@@ -748,12 +850,8 @@ Rectangle {
         // that the reply REPLACES when the typing delay elapses. Consecutive
         // parts of one reply group their avatars like any other AI message.
         var grouped = msgModel.count > 0 && msgModel.get(msgModel.count - 1).isAi
-        msgModel.append({ "isAi": true, "msg": "...", "timeLabel": "", "grouped": grouped, "ts": Date.now() })
+        msgModel.append({ "isAi": true, "msg": "...", "timeLabel": "", "grouped": grouped, "ts": Date.now(), "receipt": "" })
         chatPage.typingRow = msgModel.count - 1
-        if (msgView.stickToBottom && !msgView.moving) {
-            Qt.callLater(function() { if (msgView) msgView.positionViewAtEnd() })
-            Qt.callLater(function() { Qt.callLater(function() { if (msgView && msgView.stickToBottom) msgView.positionViewAtEnd() }) })
-        }
         replyTimer.interval = item.ms
         replyTimer.start()
     }
@@ -778,12 +876,9 @@ Rectangle {
             }
             chatPage.typingRow = -1
             if (!revealed)
-                msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false, "ts": Date.now() })
-            Qt.callLater(function() { msgView.positionViewAtEnd() })
-            // reveal grew the bubble (wrapped text): follow once, only if the
-            // user stayed pinned and isn't actively dragging/scrolling
-            if (msgView.stickToBottom && !msgView.moving)
-                Qt.callLater(function() { if (msgView && msgView.stickToBottom) msgView.positionViewAtEnd() })
+                msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false, "ts": Date.now(), "receipt": "" })
+            // the reply has landed — the "已读" receipt is stale now
+            chatPage.clearReceipts()
             // persistence (best-effort)
             try {
                 var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()
@@ -806,8 +901,7 @@ Rectangle {
                     var queued = chatPage.pendingMerged
                     chatPage.pendingMerged = ""
                     chatPage.aiBusy = true
-                    setHeaderStatus(aiService.aiName() + " 正在输入...")
-                    aiService.sendMessage(queued)
+                    chatPage.beginRead(queued)
                 }
             }
         }
@@ -816,6 +910,10 @@ Rectangle {
     property string pendingReply: ""
     // model row currently showing the in-stream typing bubble ("...")
     property int typingRow: -1
+    // read receipt: user-bubble rows awaiting the AI's 已读, and the text
+    // staged between the read beat and the actual reply request
+    property var pendingReadRows: []
+    property string pendingSendText: ""
 
     // exposed: AI avatar image path (empty = char avatar)
     property string aiAvatarSource: ""
@@ -851,5 +949,10 @@ Rectangle {
         function onEmotionSignal(name, intensity) {
             chatPage.playEmotion(name, intensity)
         }
+        function onApiStatusChanged() {
+            chatPage.refreshApiStatus()
+        }
     }
+
+    Component.onCompleted: chatPage.refreshApiStatus()
 }
