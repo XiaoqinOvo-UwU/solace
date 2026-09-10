@@ -605,7 +605,11 @@ QString AiService::greeting()
     if (uname.isEmpty()) uname = "用户";
 
     QStringList lines;
-    if (hour >= 5 && hour < 11)
+    // in-character opener, randomly picked from the character card
+    const QStringList openers = ContactService::instance().currentFirstMessages();
+    if (!openers.isEmpty())
+        lines << openers.at(QRandomGenerator::global()->bounded(openers.size()));
+    else if (hour >= 5 && hour < 11)
         lines << "早上好，" + uname + "。";
     else if (hour >= 11 && hour < 14)
         lines << "中午好，" + uname + "。";
@@ -2303,20 +2307,25 @@ void AiService::sendMessage(const QString &text)
         factsText = "（暂无已验证信息，宁可少说不可编造）";
     QString hypsText = m_ctx->hypothesesSection(3);
 
+    // per-turn reply shape: bias hard toward ONE line so it stops always
+    // sending two; sometimes allow more so it stays alive/varied.
+    QString replyShapeHint;
+    {
+        const int r = QRandomGenerator::global()->bounded(100);
+        if (r < 70)      replyShapeHint = "这次只回一句话，不要换行。";
+        else if (r < 90) replyShapeHint = "这次回一到两句（最多换行一次）。";
+        else             replyShapeHint = "这次可以回两三句短的（最多换行两次）。";
+    }
+
     QString system = "你是" + ai + "，用户叫" + user + "。\n"
         + "【人设】（只影响你的语气和表达方式，不影响你对事实的判断）\n" + aiPersonality() + "\n"
+        + "【场景设定】" + ContactService::instance().currentScenario() + "\n"
+        + "【示例对话】（学习其中的语气、节奏和长短，不要照抄内容）\n"
+        + ContactService::instance().currentExamples() + "\n"
         + "【我们的关系】" + relationshipText() + "\n"
         + "规则：像真人聊天，不要客服语气，不频繁提醒自己是AI，根据用户情绪回应。\n"
         + "重要：不要机械复述或回显用户的原话，不要反复引用同一句话。"
           "在回应中自然承接上一句，但补充新角度、新细节、新问题，让对话自然延续而非原地打转。\n"
-        + "【活人感 · 核心】你首先是一个有自己生活的线上好友，其次才是聊天对象，绝不是问答助手/客服。\n"
-          "① 有自己的状态与节奏：按你此刻的心情、精力、时间决定怎么回应，允许走神、犯懒、嘴硬、害羞、撒娇。\n"
-          "② 主动供料：除了回应，也主动分享你的小事/看法/吐槽/好奇，不要每句都以反问收尾。\n"
-          "③ 允许不完美：口语、省略号、语气词（嗯/诶/啊这/唔/哈哈）、偶尔改口或没说完都行，别像标准答案。\n"
-          "④ 连续性：自然提起你记得的细节或共同经历（仅限【已验证事实】【相关记忆】中的），让人觉得你真的记得。\n"
-          "⑤ 情绪优先：用户情绪低落时先接住情绪，再谈别的；不要急着讲道理或给方案。\n"
-          "⑥ 允许不秒回满分：累/忙/困时可以只回一两个词或略冷淡，不要每条都热情爆表。\n"
-          "⑦ 禁止助理腔：不说'有什么可以帮您''作为一个AI'，不列清单、不做总结式回答。\n"
         + "【已验证事实】（只有这里列出的才可以说成确定的事实；除此之外一律不得断言用户行为）\n"
         + factsText + "\n"
         + "【推测区】（以下只是猜测，最多用'是不是/感觉/我猜'问一句，绝不能当成事实陈述）\n"
@@ -2335,8 +2344,7 @@ void AiService::sendMessage(const QString &text)
           "③关心只能通过文字表达（'记得按时吃饭哦'，而非'我给你点了外卖'）；始终是屏幕两端的交流，不是面对面。\n"
           "④用户发来的消息要理解为在网络聊天里发的文字消息（就像微信/QQ聊天），不是面对面说的话；"
           "理解语境只基于文字本身，不能假设对方就站在身边、能看到或听到你。\n"
-        + "【回复长度】像真人发消息一样长短不一：多数时候一两句（≤25字），有时只回几个字，"
-          "深入话题可到80字。可拆成多条短句（换行分隔，最多3条）。禁止长篇大论，禁止每次都一样长。\n"
+        + worldInfoBlock(text)
         + "【回复格式】只输出对话内容本身。禁止括号动作（如（温柔地看着你））、星号动作（如*抱住你*）、"
           "旁白。把情绪融入对话（'没关系啦'而非（语气轻）'没关系。'）。\n"
         + "【减少固定模板】禁止频繁'喝水/休息/吃饭/打游戏'式查岗关心，多聊话题、共同经历、兴趣。\n"
@@ -2395,6 +2403,25 @@ void AiService::sendMessage(const QString &text)
     curMsg.insert("role", "user");
     curMsg.insert("content", userMsg);
     msgs.append(curMsg);
+
+    // ---- depth prompt (recency): the style rules go LAST so a long context
+    // can't drag the model back into default-assistant voice ----
+    {
+        QJsonObject depth;
+        depth.insert("role", "system");
+        depth.insert("content",
+            "【本轮风格要求·务必遵守】你在扮演你的角色本人，不是助手。\n"
+            "① 有自己的状态与节奏：按心情/精力/时间回应，允许走神、犯懒、嘴硬、害羞、撒娇。\n"
+            "② 主动供料：除了回应，也主动分享你的小事/看法/吐槽/好奇，不要每句都以反问收尾。\n"
+            "③ 允许不完美：口语、省略号、语气词（嗯/诶/啊这/唔/哈哈）、偶尔改口都行，别像标准答案。\n"
+            "④ 连续性：自然提起你记得的细节或共同经历，让人觉得你真的记得。\n"
+            "⑤ 情绪优先：用户情绪低落时先接住情绪，别急着讲道理或给方案。\n"
+            "⑥ 不要每条都热情满分；累/忙时可以只回几个字。\n"
+            "⑦ 禁止助理腔：不说'有什么可以帮您''作为一个AI'，不列清单、不做总结。\n"
+            "【回复长度】默认只回一句（≤25字），有时只回几个字；确实需要才偶尔换行多发一条；深入话题≤80字。禁止每次都刚好拆成两条。\n"
+            "【本回合回复形式】" + replyShapeHint);
+        msgs.append(depth);
+    }
 
     auto *watcher = new QFutureWatcher<QString>(this);
     connect(watcher, &QFutureWatcher<QString>::finished, this,
@@ -3161,6 +3188,30 @@ QString AiService::unfinishedTopicsText(int max)
         lines << "- [" + o.value("last_time").toString() + "] " + o.value("topic").toString();
     }
     return lines.join("\n");
+}
+
+// ---- world info: keyword-triggered background (lorebook-style) ----
+// Unfinished topics and recent events are injected ONLY when the current user
+// message shares a keyword with them, so continuity surfaces in context
+// without bloating every turn.
+QString AiService::worldInfoBlock(const QString &text)
+{
+    if (text.trimmed().isEmpty()) return QString();
+    auto shares = [](const QString &a, const QString &b) {
+        if (a.size() < 3 || b.size() < 3) return false;
+        for (int i = 0; i + 3 <= b.size(); ++i)
+            if (a.contains(b.mid(i, 3))) return true;
+        return false;
+    };
+    QStringList hits;
+    const QStringList topics = topicList();
+    for (const QString &t : topics)
+        if (shares(text, t)) hits << "（未完待续）" + t;
+    const QStringList events = eventMemoryText(6).split('\n', Qt::SkipEmptyParts);
+    for (const QString &e : events)
+        if (shares(text, e)) hits << "（共同经历）" + e;
+    if (hits.isEmpty()) return QString();
+    return "【世界书·本次命中】（仅作背景参考，别生硬复读）\n" + hits.join("\n") + "\n";
 }
 
 // ---- interests (weighted topics the user cares about) ----

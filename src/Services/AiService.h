@@ -260,6 +260,7 @@ private:
     // chatReply emit, memory tracking) — used by single- and double-pass paths
     void deliverReply(const QString &speech, const QString &userText, const QString &emotion);
     QString conversationStateBlock() const;  // prompt-ready state section
+    QString worldInfoBlock(const QString &text); // keyword-triggered lorebook (话题/事件)
     QString timeAwarenessBlock() const;      // current date/weekday/daypart + idle gap since last turn
     QString openLoopPromptBlock() const;     // due open loops (promises to follow up), prompt-ready
 

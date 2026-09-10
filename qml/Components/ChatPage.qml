@@ -320,16 +320,15 @@ Rectangle {
 
             onContentYChanged: recomputeAtBottom()
             onMovementEnded: recomputeAtBottom()
-            // follow content that grows while the user is parked at the very
-            // end (typing placeholder -> wrapped text, new bubble). atBottom is
-            // kept accurate by the 8px epsilon in recomputeAtBottom, so a
-            // scroll-up flips it false on the first frame and is never pulled
-            // back; the inner re-check covers the gap before callLater runs.
-            onContentHeightChanged: {
-                if (atBottom) {
-                    positionViewAtEnd()
+            // follow NEW messages only (a model count change) while parked at
+            // the end. Deliberately NOT on contentHeightChanged: scrolling up
+            // makes the ListView create/recycle delegates, which changes
+            // contentHeight every frame — pinning on that used to yank the view
+            // straight back to the bottom. (Same pattern as Element/Stream chat:
+            // scroll-to-bottom on new-message, never on layout churn.)
+            onCountChanged: {
+                if (atBottom)
                     Qt.callLater(function() { if (msgView.atBottom) msgView.positionViewAtEnd() })
-                }
             }
             delegate: Item {
                 id: delegateRoot
@@ -379,7 +378,10 @@ Rectangle {
                         anchors.left: parent.left
                         anchors.leftMargin: 12
                         anchors.top: parent.top
-                        visible: model.isAi
+                        // consecutive AI messages (multi-bubble reply) hide the
+                        // avatar — only the first of the group keeps it, exactly
+                        // like the user side
+                        visible: model.isAi && !model.grouped
                     }
                     Avatar {
                         id: userAv
@@ -879,6 +881,10 @@ Rectangle {
                 msgModel.append({ "isAi": true, "msg": text, "timeLabel": "", "grouped": false, "ts": Date.now(), "receipt": "" })
             // the reply has landed — the "已读" receipt is stale now
             chatPage.clearReceipts()
+            // the reveal grew the bubble (wrapped text) without changing the
+            // model count, so follow explicitly if the user is still at the end
+            if (msgView.atBottom && !msgView.moving)
+                Qt.callLater(function() { if (msgView.atBottom) msgView.positionViewAtEnd() })
             // persistence (best-effort)
             try {
                 var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()

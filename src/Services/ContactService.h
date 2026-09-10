@@ -29,6 +29,16 @@ public:
     Q_INVOKABLE void setCurrentName(const QString &v);
     Q_INVOKABLE void setCurrentPersonality(const QString &v);
 
+    // ---- structured character card (character-card-v2 style) ----
+    // scenario = 场景/关系设定, examples = 示例对话(教学语气),
+    // firstMessages = 多条角色开场白(随机挑选)
+    Q_INVOKABLE QString currentScenario();
+    Q_INVOKABLE QString currentExamples();
+    Q_INVOKABLE QStringList currentFirstMessages();
+    Q_INVOKABLE void setCurrentScenario(const QString &v);
+    Q_INVOKABLE void setCurrentExamples(const QString &v);
+    Q_INVOKABLE void setCurrentFirstMessages(const QStringList &v);
+
     // avatar: copy a local image into the contact dir, return stored path
     Q_INVOKABLE QString setCurrentAvatar(const QString &srcPath);
     Q_INVOKABLE QString currentAvatarPath();
@@ -57,6 +67,9 @@ private:
         QString id;
         QString name;
         QString personality;
+        QString scenario;
+        QString examples;
+        QStringList firstMessages;
     };
     QList<Contact> m_contacts;
     QString m_currentId;

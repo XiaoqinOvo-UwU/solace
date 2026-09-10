@@ -12,6 +12,33 @@
 #include <QPainter>
 #include <QPainterPath>
 
+// ---- built-in default character card (character-card-v2 style) ----
+// A real persona needs: a scene, behaviour-driving traits, and — most
+// importantly — EXAMPLE DIALOGUE that teaches the voice by demonstration.
+namespace {
+QString defaultScenario()
+{
+    return "你和她是在网上认识的线上伙伴，靠文字聊天，关系亲近；"
+           "你们有各自的生活，不在对方身边，只能通过网络联系。";
+}
+QString defaultExamples()
+{
+    return "用户：今天好累啊\n"
+           "她：先歇会儿吧 怎么了要不说说？\n"
+           "用户：没什么大事\n"
+           "她：好的吧 那我陪你摸会儿鱼。\n"
+           "用户：你在干嘛\n"
+           "她：刚走神呢，你呢，忙完了没？";
+}
+QStringList defaultFirstMessages()
+{
+    return { "嘿，在忙吗？突然想找你聊两句。",
+             "我今天有点想你诶，你在干嘛呀？",
+             "刚发呆了一下，就想到你了。干嘛呢？",
+             "喂——今天过得怎么样呀？" };
+}
+} // namespace
+
 ContactService &ContactService::instance()
 {
     static ContactService inst;
@@ -72,6 +99,11 @@ void ContactService::load()
         c.id = o.value("id").toString();
         c.name = o.value("name").toString();
         c.personality = o.value("personality").toString();
+        c.scenario = o.value("scenario").toString();
+        c.examples = o.value("examples").toString();
+        for (const QJsonValue &fm : o.value("first_messages").toArray())
+            if (fm.isString() && !fm.toString().trimmed().isEmpty())
+                c.firstMessages << fm.toString();
         if (c.id.isEmpty()) continue;
         m_contacts.append(c);
     }
@@ -87,6 +119,11 @@ void ContactService::save()
         o.insert("id", c.id);
         o.insert("name", c.name);
         o.insert("personality", c.personality);
+        o.insert("scenario", c.scenario);
+        o.insert("examples", c.examples);
+        QJsonArray fm;
+        for (const QString &s : c.firstMessages) fm.append(s);
+        o.insert("first_messages", fm);
         arr.append(o);
     }
     QString path = ConfigService::instance().configDir() + "/contacts.json";
@@ -132,6 +169,9 @@ QString ContactService::addContact(const QString &name, const QString &personali
     c.id = QString::number(QDateTime::currentMSecsSinceEpoch());
     c.name = name.trimmed().isEmpty() ? "AI" : name.trimmed();
     c.personality = personality.trimmed().isEmpty() ? "温柔、可爱、像朋友" : personality.trimmed();
+    c.scenario = defaultScenario();
+    c.examples = defaultExamples();
+    c.firstMessages = defaultFirstMessages();
     m_contacts.append(c);
     QDir().mkpath(contactDir(c.id));
     save();
@@ -210,6 +250,43 @@ void ContactService::setCurrentPersonality(const QString &v)
             return;
         }
     }
+}
+
+QString ContactService::currentScenario()
+{
+    for (const Contact &c : m_contacts)
+        if (c.id == m_currentId) return c.scenario.isEmpty() ? defaultScenario() : c.scenario;
+    return defaultScenario();
+}
+
+QString ContactService::currentExamples()
+{
+    for (const Contact &c : m_contacts)
+        if (c.id == m_currentId) return c.examples.isEmpty() ? defaultExamples() : c.examples;
+    return defaultExamples();
+}
+
+QStringList ContactService::currentFirstMessages()
+{
+    for (const Contact &c : m_contacts)
+        if (c.id == m_currentId && !c.firstMessages.isEmpty()) return c.firstMessages;
+    return defaultFirstMessages();
+}
+
+void ContactService::setCurrentScenario(const QString &v)
+{
+    for (Contact &c : m_contacts)
+        if (c.id == m_currentId) { c.scenario = v.trimmed(); save(); emit contactsChanged(); return; }
+}
+void ContactService::setCurrentExamples(const QString &v)
+{
+    for (Contact &c : m_contacts)
+        if (c.id == m_currentId) { c.examples = v.trimmed(); save(); emit contactsChanged(); return; }
+}
+void ContactService::setCurrentFirstMessages(const QStringList &v)
+{
+    for (Contact &c : m_contacts)
+        if (c.id == m_currentId) { c.firstMessages = v; save(); emit contactsChanged(); return; }
 }
 
 QString ContactService::setCurrentAvatar(const QString &srcPath)
