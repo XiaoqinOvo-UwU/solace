@@ -14,6 +14,21 @@ Page {
 
     property string note: ""
 
+    // scroll down to the 维护/更新 section (called when arriving from the home
+    // 更新公告 card). Deferred so the page is laid out after the switch.
+    function focusUpdateSection() { scrollToUpdate.restart() }
+    Timer {
+        id: scrollToUpdate
+        interval: 280
+        repeat: false
+        onTriggered: {
+            var ci = scroll.contentItem
+            if (!ci || !maintenance) return
+            ci.contentY = Math.max(0, Math.min(maintenance.y - 8,
+                                              ci.contentHeight - ci.height))
+        }
+    }
+
     // fixed header + scrollable body — same top slot as other pages
     ColumnLayout {
         anchors.fill: parent
@@ -52,6 +67,7 @@ Page {
                 }
 
                 MaintenanceSection {
+                    id: maintenance
                     onNotify: (message) => root.note = message
                 }
 

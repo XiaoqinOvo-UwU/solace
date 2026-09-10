@@ -769,11 +769,16 @@ ApplicationWindow {
                     }
                 }
 
-                HomePage {}
+                HomePage {
+                    onNavigate: (index) => {
+                        pageStack.switchPage(index)
+                        if (index === 4) settingsPage.focusUpdateSection()
+                    }
+                }
                 NetworkPage {}
                 SystemPage {}
                 EntertainmentPage {}
-                SettingsPage {}
+                SettingsPage { id: settingsPage }
             }
 
             // Chat page overlays the right content area (sidebar stays visible)
@@ -886,8 +891,6 @@ ApplicationWindow {
                 var ok = index === 0 ? proxyService.launchClash() : proxyService.launchV2ray()
                 islandToast.show(ok ? "已打开 " + which : "打开失败")
                 if (ok) statsService.record("proxy", which)
-            } else if (actionId === "update") {
-                if (index === 0) updateService.downloadAndInstall()
             }
         }
     }
@@ -895,7 +898,6 @@ ApplicationWindow {
     // chat page open state
     property bool chatOpen: false
     property bool appReady: false
-    property bool updatePrompted: false   // one island prompt per launch
 
     // unread badge for proactive AI messages
     property int unreadCount: 0
@@ -953,26 +955,25 @@ ApplicationWindow {
             locationWarnTimer.start()
         idleTimer.start()
         restTimer.start()
-        updateCheckTimer.start()   // auto-detect updates on every launch
+        root.maybeCheckUpdates()   // check once at launch, then hourly
+        updateCheckTimer.start()
     }
 
-    // ---- auto update check (launch) ----
-    // Runs quietly; only surfaces an island prompt when a newer version exists.
+    // ---- update check: hourly, SILENT, gaming-safe ----
+    // One tiny HTTPS GET per hour. Skipped entirely while a fullscreen game is
+    // running so it never competes with gameplay; the next hourly tick catches
+    // up, so a release is never missed. Results surface ONLY on the home
+    // 「更新公告」 card — no island / toast.
+    function maybeCheckUpdates() {
+        if (updateService.downloading) return
+        if (aiService.isFullscreenGame()) return
+        updateService.checkForUpdates()
+    }
     Timer {
         id: updateCheckTimer
-        interval: 8000
-        repeat: false
-        onTriggered: updateService.checkForUpdates()
-    }
-    Connections {
-        target: updateService
-        function onCheckFinished(available) {
-            if (!available || root.updatePrompted) return
-            root.updatePrompted = true
-            appCore.showIsland("发现新版本 " + updateService.latestVersion
-                               + "（当前 " + updateService.currentVersion() + "），要现在更新吗？",
-                               ["去更新", "稍后"], "update")
-        }
+        interval: 60 * 60 * 1000   // 1 hour
+        repeat: true
+        onTriggered: root.maybeCheckUpdates()
     }
 
     Timer {

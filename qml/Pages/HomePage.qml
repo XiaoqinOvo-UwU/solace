@@ -11,6 +11,8 @@ Page {
     padding: 0
     background: Rectangle { color: "transparent" }
 
+    signal navigate(int index)
+
     // ================= report / card data =================
     property var rpt: ({})
     property string advice: ""
@@ -117,7 +119,6 @@ Page {
         aiService.generateDailyAdvice()
         refreshTrending()
         refreshChangelog()
-        updateService.checkForUpdates()   // refresh the 更新公告 status
     }
     onVisibleChanged: if (visible) refreshReport()
 
@@ -323,14 +324,8 @@ Page {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        if (updateService.updateAvailable)
-                            updateService.downloadAndInstall()
-                        else
-                            page.openUrl(page.releaseUrl.length > 0
-                                         ? page.releaseUrl
-                                         : "https://github.com/XiaoqinOvo-UwU/xiaoqintools/releases")
-                    }
+                    // jump to Settings → 维护/更新 (it owns the progress bar)
+                    onClicked: page.navigate(4)
                 }
             }
 
