@@ -11,13 +11,12 @@ Page {
     padding: 0
     background: Rectangle { color: "transparent" }
 
-    signal navigate(int index)
-
     // ================= report / card data =================
     property var rpt: ({})
     property string advice: ""
     property var trending: []
     property bool trendingLoaded: false
+    property bool cardUpdating: false   // true only if THIS card started the download
     property string releaseTag: ""
     property var releaseLines: []
     property string releaseUrl: "https://github.com/XiaoqinOvo-UwU/xiaoqintools/blob/main/CHANGELOG.md"
@@ -132,6 +131,11 @@ Page {
             if (tag === "trending") { page.parseTrending(json); page.trendingLoaded = true }
             else if (tag === "changelog") { page.parseChangelog(json); page.releaseLoaded = true }
         }
+    }
+    Connections {
+        target: updateService
+        // card-initiated download finished -> drop the card's ring ownership
+        function onDownloadFinished(ok, message) { page.cardUpdating = false }
     }
 
     ColumnLayout {
@@ -281,6 +285,14 @@ Page {
                 border.color: Theme.glassBorder
                 border.width: 1
 
+                // open the GitHub releases page; sits BEHIND the content so the
+                // 更新 chip (in front) can intercept its own clicks
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: page.openUrl("https://github.com/XiaoqinOvo-UwU/xiaoqintools/releases")
+                }
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: Theme.sp4
@@ -289,11 +301,53 @@ Page {
                         Layout.fillWidth: true
                         Text { text: "更新公告"; color: Theme.text; font.pixelSize: Theme.fsDefault; font.bold: true }
                         Item { Layout.fillWidth: true }
+                        // 更新 chip: click to update FROM THE CARD (progress ring
+                        // shows here only). Disabled / falls through when none.
                         Text {
                             text: updateService.updateAvailable ? "更新 ›" : "›"
                             color: updateService.updateAvailable ? Theme.ok : Theme.textDim
                             font.pixelSize: Theme.fsDefault
                             font.bold: updateService.updateAvailable
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: updateService.updateAvailable
+                                hoverEnabled: true
+                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: { page.cardUpdating = true; updateService.downloadAndInstall() }
+                            }
+                        }
+                        // progress ring — ONLY for a card-initiated update
+                        Canvas {
+                            id: updateRing
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 20
+                            Layout.preferredHeight: 20
+                            visible: updateService.downloading && page.cardUpdating
+                            onPaint: {
+                                var ctx = getContext("2d"); ctx.reset()
+                                var c = width / 2, r = 7
+                                ctx.lineWidth = 2
+                                ctx.strokeStyle = Theme.glassBorder
+                                ctx.beginPath(); ctx.arc(c, c, r, 0, Math.PI * 2); ctx.stroke()
+                                var frac = Math.max(0, Math.min(1, updateService.downloadProgress / 100))
+                                if (frac > 0) {
+                                    ctx.strokeStyle = Theme.ok
+                                    ctx.beginPath()
+                                    ctx.arc(c, c, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac)
+                                    ctx.stroke()
+                                }
+                            }
+                            Connections {
+                                target: updateService
+                                function onDownloadStateChanged() { updateRing.requestPaint() }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                text: updateService.downloadProgress
+                                color: Theme.ok
+                                font.pixelSize: 7
+                                font.bold: true
+                            }
                         }
                     }
                     Text {
@@ -319,13 +373,6 @@ Page {
                         font.pixelSize: Theme.fsSmall
                     }
                     Item { Layout.fillHeight: true }
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    // jump to Settings → 维护/更新 (it owns the progress bar)
-                    onClicked: page.navigate(4)
                 }
             }
 

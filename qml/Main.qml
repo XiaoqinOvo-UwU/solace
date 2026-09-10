@@ -769,16 +769,11 @@ ApplicationWindow {
                     }
                 }
 
-                HomePage {
-                    onNavigate: (index) => {
-                        pageStack.switchPage(index)
-                        if (index === 4) settingsPage.focusUpdateSection()
-                    }
-                }
+                HomePage {}
                 NetworkPage {}
                 SystemPage {}
                 EntertainmentPage {}
-                SettingsPage { id: settingsPage }
+                SettingsPage {}
             }
 
             // Chat page overlays the right content area (sidebar stays visible)

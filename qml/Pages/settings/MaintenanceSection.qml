@@ -46,7 +46,7 @@ SettingsSectionCard {
             text: "检查更新"
             Layout.fillWidth: true
             onClicked: {
-                appCore.showIsland("正在检查更新...", [], "check_update")
+                section.notify("正在检查更新…")
                 updateService.checkForUpdates()
             }
         }
@@ -218,21 +218,15 @@ SettingsSectionCard {
 
     Connections {
         target: updateService
-        // result of the version check -> shown on the dynamic island
-        // (single decision point routed via AppCore) + inline note.
+        // NO islands for updates (user rule). Everything is reflected inline:
+        // the panel above when an update exists, plus an inline note for errors.
+        // This also runs for the hourly BACKGROUND check — must stay silent.
         function onCheckFinished(ok) {
-            if (updateService.updateAvailable) {
-                // download prompt lives in the inline panel above
-                // (visible: updateService.updateAvailable) — not the island.
-                return
-            } else if (updateService.lastError.length > 0) {
-                appCore.showIsland(updateService.lastError, [])
-            } else {
-                appCore.showIsland("当前已是最新版本 v" + updateService.currentVersion(), [])
-            }
+            if (updateService.lastError.length > 0)
+                section.notify(updateService.lastError)
         }
         function onDownloadFinished(ok, message) {
-            appCore.showToast(message)
+            section.notify(message)
         }
     }
 }

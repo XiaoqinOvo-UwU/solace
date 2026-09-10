@@ -98,7 +98,17 @@ void UpdateService::parseLatestRelease(const QByteArray &data)
         return;
     }
     if (!versionGreater(tag, local)) {
-        m_lastError.clear(); // truly up to date
+        // truly up to date — CLEAR any stale availability from an earlier check
+        // (otherwise "发现新版本 vX" could linger after the user updated)
+        m_lastError.clear();
+        if (m_available || !m_latest.isEmpty()) {
+            m_available = false;
+            m_latest.clear();
+            m_url.clear();
+            m_assetName.clear();
+            m_expectedSha256.clear();
+            emit updateAvailableChanged();
+        }
         emit checkFinished(false); // already up to date
         return;
     }
