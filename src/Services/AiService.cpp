@@ -1857,6 +1857,16 @@ QJsonObject extractJsonObject(const QString &raw)
     return QJsonDocument::fromJson(raw.mid(a, b - a + 1).toUtf8()).object();
 }
 
+// relationship level label from an intimacy score (shared by prompt + milestones)
+QString intimacyLevelName(int itm)
+{
+    if (itm < 20) return QStringLiteral("刚认识");
+    if (itm < 40) return QStringLiteral("逐渐熟悉");
+    if (itm < 60) return QStringLiteral("好朋友");
+    if (itm < 80) return QStringLiteral("很亲近");
+    return QStringLiteral("形影不离");
+}
+
 } // namespace
 
 // ---- auto memory: after 3+ user turns, condense the recent chat into a short note ----
@@ -2409,6 +2419,9 @@ void AiService::sendMessage(const QString &text)
     // 4) user state (system_data) and AI state (mood/energy) kept apart
     QString emotion = inferUserEmotion(text);
 
+    // v5.0: capture meaningful shared moments (共同经历) — first chat / reunion / heart-to-heart
+    maybeRecordSharedMoment(text, emotion);
+
     // ---- v3.9.2 phase 3: record into mood trend + relationship state ----
     m_moodTrend.record(emotion);
     m_relationshipState.update(emotion, m_convo->topic, text);
@@ -2841,11 +2854,13 @@ void AiService::recordEvent(const QString &type, const QString &summary)
 {
     if (!ConfigService::instance().allowLongTermMemory()) return;
     QString s = summary.trimmed();
-    if (s.isEmpty()) return;
+    if (s.size() < 6) return;                 // ignore trivial fragments
     QString mem = readMemory();
     QJsonDocument d = QJsonDocument::fromJson(mem.toUtf8());
     QJsonObject o = d.isObject() ? d.object() : QJsonObject();
     QJsonArray events = o.value("events").toArray();
+    for (const QJsonValue &v : events)        // no exact duplicates
+        if (v.toObject().value("summary").toString() == s) return;
     QJsonObject ev;
     ev.insert("date", QDate::currentDate().toString("yyyy-MM-dd"));
     ev.insert("time", QDateTime::currentDateTime().toString("HH:mm"));
@@ -2863,6 +2878,56 @@ void AiService::recordEvent(const QString &type, const QString &summary)
     // v5.0 Memory Core: mirror the event into the personal model (why it matters).
     // the event `type` (e.g. "milestone"/"mood") becomes the category.
     saveCoreMemory(s, QStringLiteral("event"), type);
+}
+
+// ---- v5.0: capture genuinely meaningful shared moments (共同经历) ----
+// After the old "mood keyword -> event" auto-capture was removed, nothing
+// wrote events[] any more, so the 共同经历 view stayed empty. Record a small,
+// low-noise set of genuinely meaningful milestones instead.
+void AiService::maybeRecordSharedMoment(const QString &userText, const QString &emotion)
+{
+    if (!ConfigService::instance().allowLongTermMemory()) return;
+    if (userText.trimmed().isEmpty()) return;
+
+    QJsonObject o = QJsonDocument::fromJson(readMemory().toUtf8()).object();
+    const QString today = QDate::currentDate().toString("yyyy-MM-dd");
+
+    auto alreadyToday = [&o, &today](const QString &type) {
+        for (const QJsonValue &v : o.value("events").toArray()) {
+            const QJsonObject e = v.toObject();
+            if (e.value("type").toString() == type && e.value("date").toString() == today)
+                return true;
+        }
+        return false;
+    };
+
+    const bool wasFirst = o.value("firstMet").toBool(false);
+    if (!wasFirst && o.value("events").toArray().isEmpty()) {
+        // the very first conversation we ever had
+        recordEvent(QStringLiteral("milestone"), QStringLiteral("我们在这里第一次聊天。"));
+    } else {
+        // coming back after a real gap
+        const QDate prev = QDate::fromString(o.value("lastChatDate").toString(), "yyyy-MM-dd");
+        const QDate now = QDate::currentDate();
+        if (prev.isValid() && prev.daysTo(now) >= 3)
+            recordEvent(QStringLiteral("reunion"),
+                        QStringLiteral("隔了 %1 天，你又来找我了。").arg(prev.daysTo(now)));
+    }
+
+    // a genuine heart-to-heart (long, emotionally heavy message) — at most once a day
+    const bool heavy = userText.size() >= 30
+        && (emotion == "sad" || emotion == "stressed" || emotion == "lonely" || emotion == "angry");
+    if (heavy && !alreadyToday(QStringLiteral("heart")))
+        recordEvent(QStringLiteral("heart"), QStringLiteral("你把心事说给我听了。"));
+
+    // persist session markers (re-read first: recordEvent rewrote the file).
+    // Only touch disk when they actually change (once/day at most).
+    if (!wasFirst || o.value("lastChatDate").toString() != today) {
+        QJsonObject w = QJsonDocument::fromJson(readMemory().toUtf8()).object();
+        w.insert("firstMet", true);
+        w.insert("lastChatDate", today);
+        writeMemory(QString::fromUtf8(QJsonDocument(w).toJson()));
+    }
 }
 
 // ---- recent event memories for prompt injection ----
@@ -3497,12 +3562,7 @@ QString AiService::relationshipText()
     int itm = o.value("intimacy").toInt();
     int tr = o.value("trust").toInt();
     int days = o.value("interaction_days").toInt();
-    QString level;
-    if (itm < 20) level = "刚认识";
-    else if (itm < 40) level = "逐渐熟悉";
-    else if (itm < 60) level = "好朋友";
-    else if (itm < 80) level = "很亲近";
-    else level = "形影不离";
+    const QString level = intimacyLevelName(itm);
     return QString("我们认识约%1天，现在是%2的关系（亲密度%3/信任度%4）。保持这个关系连续性，不要每次像第一次认识。")
         .arg(days).arg(level).arg(itm).arg(tr);
 }
@@ -3510,6 +3570,7 @@ QString AiService::relationshipText()
 void AiService::bumpRelationship(int intimacyDelta, int trustDelta)
 {
     QJsonObject o = readRelationship();
+    const int prevItm = o.value("intimacy").toInt();
     int itm = qBound(0, o.value("intimacy").toInt() + intimacyDelta, 100);
     int tr = qBound(0, o.value("trust").toInt() + trustDelta, 100);
     int days = o.value("interaction_days").toInt();
@@ -3528,6 +3589,13 @@ void AiService::bumpRelationship(int intimacyDelta, int trustDelta)
         f.write(QJsonDocument(o).toJson());
         f.close();
     }
+
+    // v5.0: record the moment the relationship crosses into a new level
+    const QString before = intimacyLevelName(prevItm);
+    const QString after  = intimacyLevelName(itm);
+    if (before != after)
+        recordEvent(QStringLiteral("milestone"),
+                    QStringLiteral("我们的关系从「%1」变成了「%2」。").arg(before, after));
 }
 
 // ================= Batch: editable categories for the memory UI =================
