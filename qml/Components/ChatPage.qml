@@ -924,7 +924,8 @@ Rectangle {
             chatPage.clearReceipts()
             // the reveal grew the bubble (wrapped text) without changing the
             // model count, so follow explicitly if the user is still at the end
-            chatPage.followBottom()
+            // NOTE: followBottom() lives on the ListView (msgView), not on chatPage
+            msgView.followBottom()
             // persistence (best-effort)
             try {
                 var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()

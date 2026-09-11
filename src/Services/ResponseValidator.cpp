@@ -102,18 +102,25 @@ QString ResponseValidator::stripPromptLeakage(const QString &s, int *countOut)
         QStringLiteral("已验证事实"), QStringLiteral("事实纪律"),
         QStringLiteral("角色边界"), QStringLiteral("交流方式"),
         QStringLiteral("最高优先级"),
+        // leaked internal state keys — the model sometimes echoes the AI-state JSON
+        QStringLiteral("\"arousal\""), QStringLiteral("\"energy\""),
+        QStringLiteral("\"mood\""), QStringLiteral("\"intimacy\""),
+        QStringLiteral("\"trust\""),
     };
     QStringList kept;
     int n = 0;
-    for (const QString &line : s.split('\n')) {
-        bool leak = circled.match(line.trimmed()).hasMatch();
+    for (const QString &raw : s.split('\n')) {
+        const QString line = raw.trimmed();
+        bool leak = circled.match(line).hasMatch();
+        // a bare JSON object line is never something the companion says
+        if (!leak && line.startsWith('{') && line.endsWith('}')) leak = true;
         if (!leak) {
             for (const QString &m : markers) {
                 if (line.contains(m)) { leak = true; break; }
             }
         }
         if (leak) { ++n; continue; }
-        kept << line;
+        kept << raw;
     }
     if (countOut) *countOut = n;
     return kept.join('\n').trimmed();
