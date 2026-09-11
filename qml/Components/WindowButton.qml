@@ -113,9 +113,7 @@ Item {
     property bool hov: false
     property bool dwn: false
 
-    ToolTip.visible: root.hov && root.tip.length > 0
-    ToolTip.text: root.tip
-    ToolTip.delay: 600
+    AppToolTip { visible: root.hov && root.tip.length > 0; text: root.tip }
 
     MouseArea {
         id: area

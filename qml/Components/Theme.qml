@@ -42,22 +42,21 @@ QtObject {
     readonly property color glassHover:  Qt.rgba(255,255,255,0.09)
     readonly property color glassPress:  Qt.rgba(255,255,255,0.13)
 
-    // ---- glass: DARK frosted surfaces ----
-    // Glass mode uses WHITE text everywhere, so any text-bearing surface must
-    // sit on a DARK translucent base to stay readable. A near-transparent / light
-    // fill washed the labels out (the "玻璃下二级菜单看不清" bug).
-    readonly property color glassPanel:      Qt.rgba(0, 0, 0, 0.34)
-    readonly property color glassPanelHover: Qt.rgba(0, 0, 0, 0.44)
-    readonly property color glassPanelPress: Qt.rgba(0, 0, 0, 0.50)
-    readonly property color glassRow:        Qt.rgba(0, 0, 0, 0.30)
-    readonly property color glassRowHover:   Qt.rgba(0, 0, 0, 0.42)
-    readonly property color glassInset:      Qt.rgba(0, 0, 0, 0.28)
+    // ---- glass: WHITE frosted surfaces (light) ----
+    // Glass mode stays WHITE (user rule). Readability comes from DARK text on
+    // these light surfaces — we never darken the glass itself.
+    readonly property color glassPanel:      Qt.rgba(1, 1, 1, 0.72)
+    readonly property color glassPanelHover: Qt.rgba(1, 1, 1, 0.82)
+    readonly property color glassPanelPress: Qt.rgba(1, 1, 1, 0.90)
+    readonly property color glassRow:        Qt.rgba(1, 1, 1, 0.60)
+    readonly property color glassRowHover:   Qt.rgba(1, 1, 1, 0.74)
+    readonly property color glassInset:      Qt.rgba(0, 0, 0, 0.06)   // subtle inset on white glass
 
     // ---- output / log insets (result panels, log boxes): a refined inset,
-    // darker than the card, never the washed default input fill ----
-    readonly property color outputBg: glassMode ? Qt.rgba(0, 0, 0, 0.30)
+    // slightly darker than the glass, never the washed default input fill ----
+    readonly property color outputBg: glassMode ? Qt.rgba(0, 0, 0, 0.06)
              : wallpaperActive ? Qt.rgba(12/255, 12/255, 12/255, 0.72) : "#141619"
-    readonly property color outputBorder: glassMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(255, 255, 255, 0.06)
+    readonly property color outputBorder: glassMode ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(255, 255, 255, 0.06)
 
     // ---- interaction / focus (a11y: visible focus ring on keyboard nav) ----
     // neutral grey — never blue
@@ -74,17 +73,17 @@ QtObject {
     // NOTE: sidebar/navigation KEEPS its dark colour in every mode (user rule).
     readonly property color sidebar:     "#0A0B0E"
     readonly property color inputBg:     glassMode ? glassInset : "#212429"
-    readonly property color text:        glassMode ? "#FFFFFF" : "#F2F3F5"
-    readonly property color textDim:     glassMode ? Qt.rgba(1,1,1,0.75) : "#9BA0A8"
-    readonly property color textMuted:   glassMode ? Qt.rgba(1,1,1,0.65) : "#B6BAC1"
+    readonly property color text:        glassMode ? "#17181C" : "#F2F3F5"
+    readonly property color textDim:     glassMode ? Qt.rgba(0,0,0,0.62) : "#9BA0A8"
+    readonly property color textMuted:   glassMode ? Qt.rgba(0,0,0,0.48) : "#B6BAC1"
     readonly property color glassBorder: glassMode
-             ? Qt.rgba(1, 1, 1, 0.27)
+             ? Qt.rgba(0, 0, 0, 0.14)
              : Qt.rgba(255,255,255,0.08)
     // status indicator idle colour: dark neutral on glass so the dot/ring stays
     // visible against the light frosted panels (white would vanish)
     readonly property color statusIdle:  glassMode ? Qt.rgba(0,0,0,0.40) : "#9A9A9A"
     // section divider bar: light on glass (Theme.accent would be a dark smudge)
-    readonly property color sectionBar:  glassMode ? Qt.rgba(1,1,1,0.80) : Theme.accent
+    readonly property color sectionBar:  glassMode ? Qt.rgba(0,0,0,0.55) : Theme.accent
 
     // ---- navigation text: ALWAYS light (sidebar stays dark in every mode) ----
     readonly property color navText:      "#F0F0F0"
@@ -170,9 +169,9 @@ QtObject {
              : wallpaperActive ? Qt.rgba(44/255, 44/255, 44/255, 0.90) : Theme.hoverBgStrong
 
     // ---- buttons ----
-    readonly property color btnFill: glassMode ? glassInset
+    readonly property color btnFill: glassMode ? glassRow
              : wallpaperActive ? Qt.rgba(36/255, 36/255, 36/255, 0.95) : Qt.rgba(1,1,1,0.08)
-    readonly property color btnFillHover: glassMode ? glassPanelHover
+    readonly property color btnFillHover: glassMode ? glassRowHover
              : wallpaperActive ? Qt.rgba(52/255, 52/255, 52/255, 0.95) : Qt.rgba(1,1,1,0.14)
     readonly property color btnFillPress: glassMode ? glassPanelPress
              : wallpaperActive ? Qt.rgba(60/255, 60/255, 60/255, 0.95) : Qt.rgba(1,1,1,0.20)
@@ -185,13 +184,12 @@ QtObject {
              : wallpaperActive ? Qt.rgba(28/255, 28/255, 28/255, 0.95) : Theme.inputBg
 
     // ---- chat: wallpaper shows through on glass ----
-    readonly property color chatBg: glassMode ? Qt.rgba(0, 0, 0, 0.30)
+    readonly property color chatBg: glassMode ? Qt.rgba(1, 1, 1, 0.50)
              : wallpaperActive ? Qt.rgba(15/255, 15/255, 15/255, 0.60) : Theme.bg
-    readonly property color chatPanelBg: glassMode ? Qt.rgba(0, 0, 0, 0.40)
+    readonly property color chatPanelBg: glassMode ? Qt.rgba(1, 1, 1, 0.72)
              : wallpaperActive ? Qt.rgba(18/255, 18/255, 18/255, 0.90) : Theme.surface
-    // AI bubble: NOT transparent in glass mode — back to the original opaque
-    // dark so white AI text always stays crisp (user rule)
-    readonly property color aiBubbleFill: glassMode ? Theme.surface
+    // AI bubble follows the (light) glass so its dark text stays readable
+    readonly property color aiBubbleFill: glassMode ? Qt.rgba(1, 1, 1, 0.78)
              : wallpaperActive ? Qt.rgba(37/255, 37/255, 37/255, 0.95) : Theme.surface
     // user bubble keeps its accent hue (opaque) on both modes
     readonly property color userBubbleFill: Theme.accent

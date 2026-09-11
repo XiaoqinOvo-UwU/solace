@@ -115,7 +115,7 @@ Page {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            ScrollBar.vertical: AppScrollBar {}
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {

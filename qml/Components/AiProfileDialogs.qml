@@ -76,7 +76,7 @@ Item {
                     id: profileScroll
                     anchors.fill: parent
                     clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.vertical: AppScrollBar {}
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     ColumnLayout {
                         width: profileScroll.availableWidth
@@ -207,7 +207,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: Theme.sp2
                             clip: true
-                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                            ScrollBar.vertical: AppScrollBar {}
                             TextArea {
                                 id: profileAiPersonality
                                 width: parent.width - Theme.sp2
@@ -268,7 +268,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: Theme.sp2
                             clip: true
-                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                            ScrollBar.vertical: AppScrollBar {}
                             TextArea {
                                 id: eventsText
                                 width: parent.width
@@ -522,7 +522,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: Theme.sp2
                             clip: true
-                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                            ScrollBar.vertical: AppScrollBar {}
                             TextArea {
                                 id: usageTextArea
                                 width: parent.width
@@ -582,7 +582,7 @@ Item {
                     anchors.fill: parent
                     anchors.margins: Theme.sp2
                     clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.vertical: AppScrollBar {}
                     TextArea {
                         id: memoryReportText
                         width: parent.width

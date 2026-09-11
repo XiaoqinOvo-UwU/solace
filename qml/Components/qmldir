@@ -17,3 +17,5 @@ StatusBadge 1.0 StatusBadge.qml
 ResultPanel 1.0 ResultPanel.qml
 IconButton 1.0 IconButton.qml
 WindowButton 1.0 WindowButton.qml
+AppToolTip 1.0 AppToolTip.qml
+AppScrollBar 1.0 AppScrollBar.qml

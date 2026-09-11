@@ -374,7 +374,8 @@ ApplicationWindow {
                     id: userMenu
                     width: 200
                     background: Rectangle {
-                        color: Theme.glassMode ? Qt.rgba(0.14, 0.14, 0.16, 0.94) : Theme.cardFill
+                        // white frosted menu in glass mode (dark text); opaque enough to read
+                        color: Theme.glassMode ? Qt.rgba(1, 1, 1, 0.96) : Theme.surface
                         radius: 10
                         border.color: Theme.glassBorder
                         border.width: 1

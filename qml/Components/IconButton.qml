@@ -24,9 +24,7 @@ Button {
     Accessible.role: Accessible.Button
     Accessible.name: root.tip.length > 0 ? root.tip : root.glyph
 
-    ToolTip.visible: root.hovered && root.tip.length > 0
-    ToolTip.text: root.tip
-    ToolTip.delay: 600
+    AppToolTip { visible: root.hovered && root.tip.length > 0; text: root.tip }
 
     background: Rectangle {
         radius: Theme.rMd

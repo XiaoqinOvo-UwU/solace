@@ -23,6 +23,8 @@
         <file>../qml/Components/ResultPanel.qml</file>
         <file>../qml/Components/IconButton.qml</file>
         <file>../qml/Components/WindowButton.qml</file>
+        <file>../qml/Components/AppToolTip.qml</file>
+        <file>../qml/Components/AppScrollBar.qml</file>
         <file>../qml/Components/SettingsSectionCard.qml</file>
         <file>../qml/Components/ThemedTextField.qml</file>
         <file>../qml/Components/ProfileEditDialog.qml</file>
