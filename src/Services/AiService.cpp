@@ -18,6 +18,7 @@
 #include "DoNotDisturbManager.h"
 #include "ProactiveScore.h"
 #include "TopicGenerator.h"
+#include "SupermemoryService.h"
 
 #include <QDir>
 #include <QFile>
@@ -2300,7 +2301,10 @@ void AiService::sendMessage(const QString &text)
 
     // FactFilter: code-level guarantee of what can be stated as fact.
     // Score memories against the current message + conversation topic.
-    QString factsText = m_ctx->factsSection(12, text, m_convo->topic);
+    // With Supermemory active the retrieved facts carry the load, so the
+    // local fact budget is halved (fewer prompt tokens every turn).
+    const bool supaMemory = SupermemoryService::enabled();
+    QString factsText = m_ctx->factsSection(supaMemory ? 6 : 12, text, m_convo->topic);
     // v3.9.1: real-time desktop info becomes an allowed fact for this turn only
     if (!desktopInfo.isEmpty())
         factsText += "\n" + desktopInfo;
@@ -2334,6 +2338,7 @@ void AiService::sendMessage(const QString &text)
           "在回应中自然承接上一句，但补充新角度、新细节、新问题，让对话自然延续而非原地打转。\n"
         + "【已验证事实】（只有这里列出的才可以说成确定的事实；除此之外一律不得断言用户行为）\n"
         + factsText + "\n"
+        + (supaMemory ? QString("【长期记忆（Supermemory 检索，视为已验证事实）】\n__SUPERMEMORY__\n") : QString())
         + "【推测区】（以下只是猜测，最多用'是不是/感觉/我猜'问一句，绝不能当成事实陈述）\n"
         + (hypsText.isEmpty() ? QString("（无）") : hypsText) + "\n"
         + "【事实纪律——代码强制，不可违反】\n"
@@ -2373,7 +2378,7 @@ void AiService::sendMessage(const QString &text)
 
     // recent conversation history so the AI can see what was said before
     QString historyBlock;
-    if (!m_chatBuffer.isEmpty())
+    if (!m_chatBuffer.isEmpty() && !supaMemory)
         historyBlock = "\n[Recent chat]\n" + m_chatBuffer.join("\n");
 
     // time prefix on the user message (KV-cache friendly); weekday included
@@ -2487,8 +2492,26 @@ void AiService::sendMessage(const QString &text)
         deliverReply(speech, userForMemory, emotion);
         watcher->deleteLater();
     });
-    QFuture<QString> future = QtConcurrent::run([msgs]() {
-        return callDeepSeekMessages(msgs);
+    QFuture<QString> future = QtConcurrent::run([msgs, text, supaMemory]() {
+        QJsonArray out = msgs;
+        if (supaMemory) {
+            const QString recalled = SupermemoryService::search(text, 6);
+            const QJsonArray copy = out;
+            for (int i = 0; i < copy.size(); ++i) {
+                const QJsonObject o = copy.at(i).toObject();
+                if (o.value("role").toString() != QLatin1String("system"))
+                    continue;
+                QString c = o.value("content").toString();
+                if (!c.contains(QLatin1String("__SUPERMEMORY__")))
+                    continue;
+                c.replace(QLatin1String("__SUPERMEMORY__"),
+                          recalled.isEmpty() ? QStringLiteral("（无）") : recalled);
+                QJsonObject n = o;
+                n.insert("content", c);
+                out.replace(i, n);
+            }
+        }
+        return callDeepSeekMessages(out);
     });
     watcher->setFuture(future);
 }
@@ -2536,6 +2559,13 @@ void AiService::deliverReply(const QString &speechIn, const QString &userText, c
     }
 
     emit chatReply(speech);
+
+    // Supermemory: persist this exchange so later sessions can recall it.
+    if (SupermemoryService::enabled()) {
+        const QString convo = "用户: " + userText + "\n" + aiName() + ": " + speech;
+        const QString cid = "ex_" + QString::number(QDateTime::currentMSecsSinceEpoch());
+        (void)QtConcurrent::run([convo, cid]() { SupermemoryService::addMemory(convo, cid); });
+    }
 
     // auto memory: track this turn, summarize after enough turns
     trackChatTurn(userText, speech);

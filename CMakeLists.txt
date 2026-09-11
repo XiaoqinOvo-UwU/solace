@@ -41,6 +41,8 @@ set(APP_SOURCES
     src/Services/MemoryImportanceEvaluator.cpp
     src/Services/MemoryConflictManager.h
     src/Services/MemoryConflictManager.cpp
+    src/Services/SupermemoryService.h
+    src/Services/SupermemoryService.cpp
     src/Services/ConversationState.h
     src/Services/ConversationStateManager.h
     src/Services/ConversationStateManager.cpp
