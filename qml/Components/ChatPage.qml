@@ -775,7 +775,12 @@ Rectangle {
             setHeaderStatus(aiService.aiName() + " 正在输入...")
             var m = chatPage.pendingSendText
             chatPage.pendingSendText = ""
-            if (m.length > 0) aiService.sendMessage(m)
+            if (m.length > 0) {
+                // remember which conversation this request belongs to, so a late
+                // reply can never surface in a different contact's chat
+                chatPage.pendingReplyContacts.push(chatPage.currentContactId)
+                aiService.sendMessage(m)
+            }
         }
     }
 
@@ -824,6 +829,14 @@ Rectangle {
     // another; rapid consecutive messages never cancel an earlier reply.
     // Multi-line replies are split into separate short bubbles (like chat apps).
     function appendAi(text) {
+        // a reply whose conversation the user has since left must not appear in
+        // the current chat — persist it to its own contact and drop it here.
+        var target = chatPage.pendingReplyContacts.length > 0
+                   ? chatPage.pendingReplyContacts.shift() : ""
+        if (target !== "" && target !== chatPage.currentContactId) {
+            try { saveMsg(target, true, text, Date.now()) } catch (e) { }
+            return
+        }
         // split into lines (trim empty), each becomes its own bubble
         var parts = text.split(/\r?\n/).map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
         if (parts.length === 0) parts = [text]
@@ -862,6 +875,8 @@ Rectangle {
 
     property var replyQueue: []
     property bool replyBusy: false
+    // contact id per in-flight AI request (FIFO) — routes late replies
+    property var pendingReplyContacts: []
 
     function pumpReplies() {
         // nothing pending, nothing running -> done
