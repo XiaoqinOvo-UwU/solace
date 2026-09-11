@@ -20,6 +20,10 @@ Button {
     focusPolicy: Qt.StrongFocus
     font.pixelSize: Theme.fsDefault
 
+    // a11y: glyph-only, so the tooltip is the only human-readable name
+    Accessible.role: Accessible.Button
+    Accessible.name: root.tip.length > 0 ? root.tip : root.glyph
+
     ToolTip.visible: root.hovered && root.tip.length > 0
     ToolTip.text: root.tip
     ToolTip.delay: 600

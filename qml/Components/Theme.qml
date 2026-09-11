@@ -183,4 +183,16 @@ QtObject {
     readonly property color userBubbleFill: Theme.accent
     // text on the (accent-coloured) user bubble stays white in every mode
     readonly property color onUserBubble: "#FFFFFF"
+
+    // ================= DYNAMIC ISLAND (transient toast) =================
+    readonly property color islandBg:     "#1C1C20"
+    readonly property color islandBorder: Qt.rgba(255, 255, 255, 0.10)
+    readonly property color islandText:   "#F0F0F0"
+    // choice buttons — NEUTRAL grey (project rule: hover neutral, never blue)
+    readonly property color islandChoice:      "#24272C"
+    readonly property color islandChoiceHover: "#31353B"
+    readonly property color islandChoicePress: "#3A3F46"
+
+    // ================= BADGES =================
+    readonly property color unread: "#E5534B"   // unread notification dot
 }

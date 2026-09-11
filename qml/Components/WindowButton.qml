@@ -19,6 +19,9 @@ Item {
     width: 46
     height: 36
 
+    Accessible.role: Accessible.Button
+    Accessible.name: root.tip.length > 0 ? root.tip : root.variant
+
     readonly property bool danger: root.variant === "close"
     readonly property color iconColor: root.hov ? (danger ? "#FFFFFF" : Qt.rgba(1,1,1,0.9))
                                                : Qt.rgba(1,1,1,0.5)

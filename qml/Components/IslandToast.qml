@@ -40,8 +40,8 @@ Rectangle {
     // choice: fixed 88, label above buttons.
     height: choiceRow.visible ? 88 : Math.max(48, label.implicitHeight + 32)
     radius: height / 2
-    color: "#1C1C20"
-    border.color: Qt.rgba(255, 255, 255, 0.10)
+    color: Theme.islandBg
+    border.color: Theme.islandBorder
     border.width: 1
     Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
@@ -123,7 +123,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: island.options.length === 0
             Layout.alignment: Qt.AlignHCenter
-            color: "#F0F0F0"
+            color: Theme.islandText
             font.pixelSize: Theme.fsBody
             text: island.message
             horizontalAlignment: Text.AlignHCenter
@@ -163,17 +163,18 @@ Rectangle {
 
                     contentItem: Text {
                         text: choiceBtn.text
-                        color: "#FFFFFF"
+                        color: Theme.islandText
                         font: choiceBtn.font
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
                         radius: height / 2
-                        color: choiceBtn.down ? "#3A4656"
-                             : choiceBtn.hovered ? "#2C3644"
-                             : "#242E3C"
-                        border.color: Qt.rgba(255, 255, 255, 0.12)
+                        // neutral grey — the project rule bans blue hovers
+                        color: choiceBtn.down ? Theme.islandChoicePress
+                             : choiceBtn.hovered ? Theme.islandChoiceHover
+                             : Theme.islandChoice
+                        border.color: Theme.islandBorder
                         border.width: 1
                         Behavior on color { ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutCubic } }
 

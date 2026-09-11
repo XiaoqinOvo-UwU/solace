@@ -31,6 +31,15 @@ Rectangle {
     scale: root.pressed ? 0.99 : root.hovered ? 1.008 : 1.0
     Behavior on scale { NumberAnimation { duration: Theme.durMid; easing.type: Easing.OutCubic } }
 
+    // a11y: it is a button (whole card activates)
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: root.title
+    Accessible.description: root.description
+    Keys.onReturnPressed: root.clicked()
+    Keys.onEnterPressed: root.clicked()
+    Keys.onSpacePressed: root.clicked()
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: Theme.sp4
@@ -81,6 +90,17 @@ Rectangle {
                 font.pixelSize: Theme.fsDefault
             }
         }
+    }
+
+    // focus ring (a11y keyboard nav)
+    Rectangle {
+        anchors.fill: parent
+        radius: Theme.rXl
+        color: "transparent"
+        border.color: Theme.focusRing
+        border.width: 1
+        visible: root.activeFocus
+        opacity: 0.9
     }
 
     MouseArea {

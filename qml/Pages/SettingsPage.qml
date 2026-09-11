@@ -62,7 +62,7 @@ Page {
 
                 Label {
                     Layout.fillWidth: true
-                    color: "#4EA86B"
+                    color: Theme.ok
                     font.pixelSize: 13
                     text: root.note
                     wrapMode: Text.Wrap

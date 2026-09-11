@@ -84,6 +84,26 @@ Rectangle {
         }
     }
 
+    // a11y: only rows that actually activate are focusable buttons
+    activeFocusOnTab: root.clickable
+    Accessible.role: root.clickable ? Accessible.Button : Accessible.StaticText
+    Accessible.name: root.title
+    Accessible.description: root.subtitle
+    Keys.onReturnPressed: if (root.clickable) root.clicked()
+    Keys.onEnterPressed: if (root.clickable) root.clicked()
+    Keys.onSpacePressed: if (root.clickable) root.clicked()
+
+    // focus ring (a11y keyboard nav)
+    Rectangle {
+        anchors.fill: parent
+        radius: Theme.rMd
+        color: "transparent"
+        border.color: Theme.focusRing
+        border.width: 1
+        visible: root.clickable && root.activeFocus
+        opacity: 0.9
+    }
+
     MouseArea {
         anchors.fill: parent
         visible: root.clickable

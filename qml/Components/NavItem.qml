@@ -23,7 +23,9 @@ Rectangle {
          : "transparent"
     radius: Theme.rMd
     Behavior on color { ColorAnimation { duration: Theme.durMid } }
-    focus: true
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: root.label
 
     // selected indicator (left bar)
     Rectangle {

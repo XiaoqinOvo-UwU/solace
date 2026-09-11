@@ -24,6 +24,9 @@ Rectangle {
     border.width: 1
     clip: true
 
+    Accessible.role: Accessible.StaticText
+    Accessible.name: root.title
+
     // height = inner ColumnLayout implicit height + vertical margins
     // (anchors.margins are not included in the layout's implicit size) —
     // matches the real layout exactly, so nothing gets clipped
@@ -91,6 +94,13 @@ Rectangle {
                 text: root.busy ? "检测中…" : root.emptyHint
                 color: Theme.textDim
                 font.pixelSize: Theme.fsSmall
+                // subtle "alive" pulse while a background operation runs
+                SequentialAnimation on opacity {
+                    running: root.busy
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.45; duration: 700; easing.type: Easing.InOutSine }
+                    NumberAnimation { to: 1.0;  duration: 700; easing.type: Easing.InOutSine }
+                }
             }
         }
     }

@@ -19,6 +19,11 @@ Page {
     property bool proxyBusy: false
     property bool proxyOnline: false
 
+    // loading state per diagnostic tool (drives ResultPanel.busy)
+    property bool nodeBusy: false
+    property bool speedBusy: false
+    property bool diagBusy: false
+
     // dashboard metrics
     property string latencyText: "--"
     property string speedText: "--"
@@ -361,6 +366,8 @@ Page {
                             Text { text: "检测各站点延迟"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
                         }
                         onClicked: {
+                            nodeResultText.text = ""
+                            page.nodeBusy = true
                             notify("节点测速中...")
                             netService.nodeTestAsync()
                         }
@@ -369,6 +376,7 @@ Page {
                         Layout.fillWidth: true
                         title: "节点延迟"
                         emptyHint: "点击上方卡片开始测速"
+                        busy: page.nodeBusy
                         text: nodeResultText.text
                     }
                 }
@@ -393,6 +401,8 @@ Page {
                             Text { text: "测下载速度"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
                         }
                         onClicked: {
+                            speedResultText.text = ""
+                            page.speedBusy = true
                             notify("测速中...")
                             netService.speedTestAsync(true, 10 * 1024 * 1024)
                         }
@@ -401,6 +411,7 @@ Page {
                         Layout.fillWidth: true
                         title: "下载速度"
                         emptyHint: "点击上方卡片开始测速"
+                        busy: page.speedBusy
                         text: speedResultText.text
                     }
                 }
@@ -424,6 +435,8 @@ Page {
                             Text { text: "端口 / DNS / 连通性"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
                         }
                         onClicked: {
+                            diagResultText.text = ""
+                            page.diagBusy = true
                             notify("开始自检...")
                             netService.diagnoseAsync()
                         }
@@ -432,6 +445,7 @@ Page {
                         Layout.fillWidth: true
                         title: "自检报告"
                         emptyHint: "点击上方卡片开始自检"
+                        busy: page.diagBusy
                         text: diagResultText.text
                     }
                 }
@@ -497,6 +511,7 @@ Page {
         function onResult(text) {
             if (text.indexOf("google.com") >= 0) {
                 nodeResultText.text = text
+                page.nodeBusy = false
                 appCore.showToast("节点测速完成")
                 // update dashboard latency (first line usually has ms)
                 page.lastLatency = "--"
@@ -507,9 +522,11 @@ Page {
             } else if (text.indexOf("=== 进程检测 ===") >= 0) {
                 // self-diagnosis result shows inside the connection status panel
                 diagResultText.text = text
+                page.diagBusy = false
                 appCore.showToast("自检完成")
             } else if (text.indexOf("Mbps") >= 0) {
                 speedResultText.text = text
+                page.speedBusy = false
                 appCore.showToast("测速完成")
                 var sm = text.match(/(\d+(?:\.\d+)?)\s*Mbps/i)
                 if (sm) page.speedText = sm[1] + " Mbps"

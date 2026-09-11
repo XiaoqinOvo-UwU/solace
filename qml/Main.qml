@@ -34,18 +34,18 @@ ApplicationWindow {
 
     // Global dark palette so Quick Controls render dark.
     palette {
-        window: "#141414"
-        windowText: "#F0F0F0"
-        base: "#262626"
-        alternateBase: "#1E1E1E"
-        text: "#F0F0F0"
-        button: "#3A3F4A"
-        buttonText: "#FFFFFF"
-        highlight: "#3A3F4A"
-        highlightedText: "#FFFFFF"
-        toolTipBase: "#1E1E1E"
-        toolTipText: "#F0F0F0"
-        placeholderText: "#9A9A9A"
+        window: Theme.bg
+        windowText: Theme.navText
+        base: Theme.inputBg
+        alternateBase: Theme.surface
+        text: Theme.navText
+        button: Theme.accent
+        buttonText: Theme.onUserBubble
+        highlight: Theme.accent
+        highlightedText: Theme.onUserBubble
+        toolTipBase: Theme.surface
+        toolTipText: Theme.text
+        placeholderText: Theme.textDim
     }
 
     property int currentPage: 0
@@ -468,7 +468,7 @@ ApplicationWindow {
                                 Rectangle {
                                     width: 10; height: 10
                                     radius: 5
-                                    color: "#E5534B"
+                                    color: Theme.unread
                                     border.color: Theme.sidebar
                                     border.width: 1
                                     anchors.right: parent.right

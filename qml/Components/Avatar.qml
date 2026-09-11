@@ -21,6 +21,10 @@ Rectangle {
     height: size
     radius: size / 2
     color: Theme.accent
+    // a11y: a pressable avatar behaves as a button (opens the picker/profile)
+    Accessible.role: root.pressable ? Accessible.Button : Accessible.Image
+    Accessible.name: root.charText
+    activeFocusOnTab: root.pressable
     clip: true
     // antialiasing smooths the circular crop edge; mipmap keeps the image
     // crisp when a large source is scaled DOWN to a small avatar
@@ -47,6 +51,21 @@ Rectangle {
         font.pixelSize: root.size * 0.42
         font.bold: true
     }
+    // focus ring (a11y) — only meaningful when the avatar is interactive
+    Rectangle {
+        anchors.fill: parent
+        radius: root.radius
+        color: "transparent"
+        border.color: Theme.focusRing
+        border.width: 1
+        visible: root.pressable && root.activeFocus
+        opacity: 0.9
+    }
+
+    Keys.onReturnPressed: if (root.pressable) root.clicked()
+    Keys.onEnterPressed: if (root.pressable) root.clicked()
+    Keys.onSpacePressed: if (root.pressable) root.clicked()
+
     MouseArea {
         id: pressArea
         anchors.fill: parent
