@@ -74,7 +74,7 @@ Page {
                 Label {
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignHCenter
-                    text: "Solace v" + updateService.currentVersion()
+                    text: "Solace v" + updateService.currentVersion() + " · 泉此方天下第一"
                     color: Theme.textDim
                     font.pixelSize: 12
                 }
