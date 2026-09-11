@@ -1,4 +1,9 @@
-﻿import QtQuick
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 The XiaoQinTools Authors
+// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// later. See the LICENSE file for details.
+
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
