@@ -19,8 +19,9 @@ Rectangle {
     property bool hovered: false
     signal clicked()
 
-    // visible resting state (not transparent): glass fill + hairline border
-    color: root.hovered ? Theme.hoverBgStrong : Theme.glass
+    // visible resting state (not transparent): opaque secondary surface +
+    // hairline border, so the label stays readable over any background
+    color: root.hovered ? Theme.rowBgHover : Theme.rowBg
     radius: Theme.rMd
     border.color: Theme.glassBorder
     border.width: 1

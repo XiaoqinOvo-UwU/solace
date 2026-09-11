@@ -14,18 +14,18 @@ QtObject {
     // ---- backgrounds (black-grey, tinted with the accent hue ~217°) ----
     // Rule: never a pure neutral — every surface carries a trace of the
     // brand hue so accents feel native to the surface (premium-UI baseline).
-    readonly property color bg:          "#141518"
-    readonly property color surface:     "#1E2024"
-    readonly property color card:        "#1E2024"
+    readonly property color bg:          "#0E0F12"
+    readonly property color surface:     "#171A1F"
+    readonly property color card:        "#1C1F25"
 
-    // ---- accents ----
-    readonly property color accent:      "#3A3F4A"
-    readonly property color accentHover: "#4A5160"
-    readonly property color selected:    "#33383F"
+    // ---- accents (neutral slate — no blue, per project rule) ----
+    readonly property color accent:      "#3E4450"
+    readonly property color accentHover: "#4C5361"
+    readonly property color selected:    "#2E333B"
 
     // hover highlight — neutral grey tint (no blue)
-    readonly property color hoverBg:     "#25272C"
-    readonly property color hoverBgStrong: "#2E3137"
+    readonly property color hoverBg:     "#23262C"
+    readonly property color hoverBgStrong: "#2C3037"
 
     // ---- status ----
     readonly property color ok:          "#5FA87A"
@@ -55,13 +55,13 @@ QtObject {
     // ---- glass-mode variants (referenced by the appearance block below) ----
     // Glass mode: WHITE text on the grey-tinted frosted glass (readability).
     // NOTE: sidebar/navigation KEEPS its dark colour in every mode (user rule).
-    readonly property color sidebar:     "#0D0E11"
+    readonly property color sidebar:     "#0A0B0E"
     readonly property color inputBg:     glassMode
              ? Qt.rgba(1, 1, 1, 0.09)
-             : "#26282D"
-    readonly property color text:        glassMode ? "#FFFFFF" : "#F0F0F0"
-    readonly property color textDim:     glassMode ? Qt.rgba(1,1,1,0.75) : "#9A9A9A"
-    readonly property color textMuted:   glassMode ? Qt.rgba(1,1,1,0.65) : "#B0B0B0"
+             : "#212429"
+    readonly property color text:        glassMode ? "#FFFFFF" : "#F2F3F5"
+    readonly property color textDim:     glassMode ? Qt.rgba(1,1,1,0.75) : "#9BA0A8"
+    readonly property color textMuted:   glassMode ? Qt.rgba(1,1,1,0.65) : "#B6BAC1"
     readonly property color glassBorder: glassMode
              ? Qt.rgba(1, 1, 1, 0.27)
              : Qt.rgba(255,255,255,0.08)
@@ -141,13 +141,23 @@ QtObject {
     // enough for WHITE text to stay readable. Alphas reduced ~25% (更透明).
     readonly property color cardFill: glassMode
              ? Qt.rgba(1, 1, 1, 0.14)
-             : wallpaperActive ? Qt.rgba(24/255, 24/255, 24/255, 0.85) : Theme.surface
+             : wallpaperActive ? Qt.rgba(24/255, 24/255, 24/255, 0.85) : Theme.card
     readonly property color cardFillHover: glassMode
              ? Qt.rgba(1, 1, 1, 0.21)
              : wallpaperActive ? Qt.rgba(31/255, 31/255, 31/255, 0.85) : Theme.hoverBgStrong
     readonly property color cardFillPress: glassMode
              ? Qt.rgba(1, 1, 1, 0.24)
              : wallpaperActive ? Qt.rgba(38/255, 38/255, 38/255, 0.85) : Theme.hoverBgStrong
+
+    // ---- secondary surface: rows / sub-cards / menus INSIDE a card ----
+    // Must stay OPAQUE enough for the text to read (a near-transparent fill
+    // washed the labels out over dark & wallpaper backgrounds — the 二级卡面 bug).
+    readonly property color rowBg: glassMode
+             ? Qt.rgba(1, 1, 1, 0.12)
+             : wallpaperActive ? Qt.rgba(31/255, 31/255, 31/255, 0.86) : "#20242A"
+    readonly property color rowBgHover: glassMode
+             ? Qt.rgba(1, 1, 1, 0.19)
+             : wallpaperActive ? Qt.rgba(44/255, 44/255, 44/255, 0.90) : Theme.hoverBgStrong
 
     // ---- buttons ----
     readonly property color btnFill: glassMode
