@@ -1684,6 +1684,28 @@ QString AiService::memoryDetail()
             lines << "  · " + v.toString();
     }
 
+    // ---- v5.0 Memory Core: the personal model — each memory + WHY it matters ----
+    {
+        MemoryStore store(memoryPath());
+        store.load();
+        QVector<CoreMemory> core = store.records();
+        if (!core.isEmpty()) {
+            std::sort(core.begin(), core.end(), [](const CoreMemory &a, const CoreMemory &b) {
+                return a.importance * a.confidence > b.importance * b.confidence;
+            });
+            lines << "";
+            lines << "【我为什么记得这些（个人模型）】";
+            for (const CoreMemory &r : core) {
+                QStringList meta;
+                if (!r.category.isEmpty())     meta << r.category;
+                if (!r.emotion.isEmpty())      meta << QString("情绪:%1").arg(r.emotion);
+                if (!r.relationship.isEmpty()) meta << QString("关系:%1").arg(r.relationship);
+                meta << QString("重要度%1").arg(QString::number(r.importance, 'f', 2));
+                lines << QString("  · %1  （%2）").arg(r.text.left(80), meta.join(QStringLiteral(" · ")));
+            }
+        }
+    }
+
     // recent chat topics (last few chat texts)
     QJsonArray chats = o.value("chatLog").toArray();
     if (!chats.isEmpty()) {
@@ -1788,10 +1810,13 @@ void AiService::setMemoryRaw(const QString &json)
     QJsonDocument d = QJsonDocument::fromJson(json.toUtf8(), &pe);
     if (pe.error != QJsonParseError::NoError || !d.isObject()) return; // keep old on invalid
     QJsonObject o = d.object();
-    // always preserve the first-use stamp
+    // preserve keys the raw editor should not silently drop: the first-use
+    // stamp and the v5.0 personal model (memoryCore[])
     QJsonObject old = QJsonDocument::fromJson(readMemory().toUtf8()).object();
     if (!o.contains("created") && old.contains("created"))
         o.insert("created", old.value("created"));
+    if (!o.contains("memoryCore") && old.contains("memoryCore"))
+        o.insert("memoryCore", old.value("memoryCore"));
     writeMemory(QString::fromUtf8(QJsonDocument(o).toJson()));
     m_chatBuffer.clear();
     m_userTurns = 0;
@@ -1807,6 +1832,15 @@ void AiService::clearMemory()
     if (!created.isEmpty()) o.insert("created", created);
     o.insert("clearedAt", QDateTime::currentDateTime().toString(Qt::ISODate));
     writeMemory(QString::fromUtf8(QJsonDocument(o).toJson()));
+
+    // v5.0: "clear memory" must also wipe the personal model (memoryCore[]),
+    // otherwise the AI would still "remember" after the user cleared everything.
+    {
+        MemoryStore store(memoryPath());
+        store.clear();
+        store.save();
+    }
+
     m_chatBuffer.clear();
     m_userTurns = 0;
 }
@@ -2104,6 +2138,34 @@ void AiService::dedupMemoryNotes()
     }
 
     if (changed) writeMemory(QString::fromUtf8(QJsonDocument(o).toJson()));
+
+    // 3) v5.0: collapse duplicate personal-model entries (same text) — keep the
+    //    copy with the highest importance*confidence (notes mirror into core)
+    {
+        MemoryStore store(memoryPath());
+        store.load();
+        const QVector<CoreMemory> recs = store.records();
+        if (recs.size() >= 2) {
+            QVector<CoreMemory> out;
+            for (const CoreMemory &r : recs) {
+                bool merged = false;
+                for (CoreMemory &k : out) {
+                    if (k.text == r.text) {
+                        if (r.importance * r.confidence > k.importance * k.confidence)
+                            k = r;
+                        merged = true;
+                        break;
+                    }
+                }
+                if (!merged) out << r;
+            }
+            if (out.size() != recs.size()) {
+                store.clear();
+                for (const CoreMemory &r : out) store.add(r);
+                store.save();
+            }
+        }
+    }
 }
 
 // ---- memory decay: older memories shrink into a short gist (只记得大概) ----
@@ -2734,70 +2796,10 @@ void AiService::deliverReply(const QString &speechIn, const QString &userText, c
     }
 }
 
-// static wrapper so the lambda doesn't capture this
-QString AiService::callDeepSeekStatic(const QString &system, const QString &user)
-{
-    QString key = ConfigService::instance().apiKey();
-    if (key.isEmpty()) return "（还没配置 API Key，去设置里填一下~）";
-    QString base = ConfigService::instance().baseUrl().trimmed();
-    if (base.isEmpty()) base = "https://api.deepseek.com/v1";
-    QString model = ConfigService::instance().model();
-
-    QJsonObject msg1;
-    msg1.insert("role", "system");
-    msg1.insert("content", system);
-    QJsonObject msg2;
-    msg2.insert("role", "user");
-    msg2.insert("content", user);
-    QJsonArray arr;
-    arr.append(msg1);
-    arr.append(msg2);
-
-    QJsonObject body;
-    body.insert("model", model.isEmpty() ? "deepseek-chat" : model);
-    body.insert("messages", arr);
-    body.insert("stream", false);
-    // discourage the model from repeating the same tokens/topics (anti-looping)
-    body.insert("frequency_penalty", 0.3);
-    body.insert("presence_penalty", 0.3);
-
-    QNetworkAccessManager mgr;
-    QNetworkRequest req;
-    req.setUrl(QUrl(base + "/chat/completions"));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    req.setRawHeader("Authorization", ("Bearer " + key).toUtf8());
-    QNetworkReply *reply = mgr.post(req, QJsonDocument(body).toJson());
-    QEventLoop loop;
-    bool timedOut = false;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    // don't hang forever if the network stalls (proxy down / slow API)
-    QTimer::singleShot(30000, &loop, [&loop, &timedOut]() { timedOut = true; loop.quit(); });
-    loop.exec();
-    if (timedOut) {
-        reply->abort();
-        reply->deleteLater();
-        return "（请求超时了，检查一下网络或代理~）";
-    }
-    QByteArray data = reply->readAll();
-    reply->deleteLater();
-    QJsonParseError pe;
-    QJsonDocument resp = QJsonDocument::fromJson(data, &pe);
-    if (pe.error != QJsonParseError::NoError || !resp.isObject())
-        return "（请求出错：无法解析回复）";
-    const QJsonArray choices = resp.object().value("choices").toArray();
-    if (choices.isEmpty()) {
-        // surface the real server-side reason instead of a generic message
-        const QString err = resp.object().value("error").toObject().value("message").toString();
-        if (!err.isEmpty()) return "（服务器返回错误：" + err + "）";
-        return "（没有回复内容）";
-    }
-    const QJsonObject first = choices.first().toObject();
-    const QJsonObject message = first.value("message").toObject();
-    return message.value("content").toString("（空回复）").trimmed();
-}
-
-// ---- DeepSeek chat with a full role-based messages array ----
-QString AiService::callDeepSeekMessages(const QJsonArray &messages)
+// one synchronous chat-completion POST, shared by both callers. Uses Qt's own
+// transfer timeout (no manual QEventLoop/timer lambda that could fire after the
+// loop is gone), and checks the reply error before reading the body.
+QString AiService::postChatCompletion(const QJsonArray &messages)
 {
     QString key = ConfigService::instance().apiKey();
     if (key.isEmpty()) return "（还没配置 API Key，去设置里填一下~）";
@@ -2809,7 +2811,7 @@ QString AiService::callDeepSeekMessages(const QJsonArray &messages)
     body.insert("model", model.isEmpty() ? "deepseek-chat" : model);
     body.insert("messages", messages);
     body.insert("stream", false);
-    // discourage repetition / looping over the same words or topics
+    // discourage the model from repeating the same tokens/topics (anti-looping)
     body.insert("frequency_penalty", 0.3);
     body.insert("presence_penalty", 0.3);
 
@@ -2818,21 +2820,22 @@ QString AiService::callDeepSeekMessages(const QJsonArray &messages)
     req.setUrl(QUrl(base + "/chat/completions"));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     req.setRawHeader("Authorization", ("Bearer " + key).toUtf8());
+    req.setTransferTimeout(30000);   // abort on a stall (proxy down / slow API)
     QNetworkReply *reply = mgr.post(req, QJsonDocument(body).toJson());
+
     QEventLoop loop;
-    bool timedOut = false;
     QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    QTimer::singleShot(30000, &loop, [&loop, &timedOut]() { timedOut = true; loop.quit(); });
     loop.exec();
-    if (timedOut) {
-        reply->abort();
-        reply->deleteLater();
-        return "（请求超时了，检查一下网络或代理~）";
-    }
-    QByteArray data = reply->readAll();
+
+    const QByteArray data = reply->readAll();
+    const QNetworkReply::NetworkError netErr = reply->error();
+    const QString netErrStr = reply->errorString();
     reply->deleteLater();
+
+    if (netErr != QNetworkReply::NoError)
+        return "（请求失败：" + netErrStr + "）";
     QJsonParseError pe;
-    QJsonDocument resp = QJsonDocument::fromJson(data, &pe);
+    const QJsonDocument resp = QJsonDocument::fromJson(data, &pe);
     if (pe.error != QJsonParseError::NoError || !resp.isObject())
         return "（请求出错：无法解析回复）";
     const QJsonArray choices = resp.object().value("choices").toArray();
@@ -2842,9 +2845,29 @@ QString AiService::callDeepSeekMessages(const QJsonArray &messages)
         if (!err.isEmpty()) return "（服务器返回错误：" + err + "）";
         return "（没有回复内容）";
     }
-    const QJsonObject first = choices.first().toObject();
-    const QJsonObject message = first.value("message").toObject();
-    return message.value("content").toString("（空回复）").trimmed();
+    return choices.first().toObject().value("message").toObject()
+                  .value("content").toString("（空回复）").trimmed();
+}
+
+// static wrapper so the lambda doesn't capture this
+QString AiService::callDeepSeekStatic(const QString &system, const QString &user)
+{
+    QJsonObject msg1;
+    msg1.insert("role", "system");
+    msg1.insert("content", system);
+    QJsonObject msg2;
+    msg2.insert("role", "user");
+    msg2.insert("content", user);
+    QJsonArray arr;
+    arr.append(msg1);
+    arr.append(msg2);
+    return postChatCompletion(arr);
+}
+
+// ---- DeepSeek chat with a full role-based messages array ----
+QString AiService::callDeepSeekMessages(const QJsonArray &messages)
+{
+    return postChatCompletion(messages);
 }
 
 // ================= Batch 1: companion relationship + event memory =================

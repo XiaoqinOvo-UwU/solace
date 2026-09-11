@@ -228,6 +228,7 @@ private:
                         double importance = -1.0, double confidence = -1.0);
     QString personalModelBlock(int maxItems = 6, const QString &currentEmotion = QString()) const; // prompt-ready "why it matters" lines
     void maybeRecordSharedMoment(const QString &userText, const QString &emotion); // 共同经历 milestones (first / reunion / heart-to-heart)
+    static QString postChatCompletion(const QJsonArray &messages);   // shared synchronous LLM POST
     QStringList m_chatBuffer;   // recent turns (user/ai pairs), bounded
     int m_userTurns = 0;        // user messages since last summary
     bool m_summarizing = false;
