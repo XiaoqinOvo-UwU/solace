@@ -11,6 +11,7 @@
 #include "ActivityMemory.h"
 #include "MoodTrend.h"
 #include "RelationshipState.h"
+#include "MemoryStore.h"
 class QTimer;
 class ContextManager;
 struct ConversationState;
@@ -214,7 +215,18 @@ private:
     void trackChatTurn(const QString &userText, const QString &aiReply);
     void maybeSummarize();
     void appendNote(const QString &note);
+    void appendNote(const QString &note, const CoreMemory &core); // v5.0: with personal-model fields
     void dedupMemoryNotes();   // drop duplicate note cores on startup
+
+    // ---- v5.0 Memory Core: annotate a memory with WHY it matters ----
+    // Any field left empty / negative is filled by heuristics, so callers
+    // may pass only what the structured LLM produced.
+    void saveCoreMemory(const QString &text, const QString &source,
+                        const QString &category = QString(),
+                        const QString &emotion = QString(),
+                        const QString &relationship = QString(),
+                        double importance = -1.0, double confidence = -1.0);
+    QString personalModelBlock(int maxItems = 6) const;   // prompt-ready "why it matters" lines
     QStringList m_chatBuffer;   // recent turns (user/ai pairs), bounded
     int m_userTurns = 0;        // user messages since last summary
     bool m_summarizing = false;
