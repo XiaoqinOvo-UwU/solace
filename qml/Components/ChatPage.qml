@@ -46,6 +46,27 @@ Rectangle {
     // 10 minutes = gap threshold for a time separator
     property int gapThresholdMs: 10 * 60 * 1000
 
+    // reset the send/reply state machine. loadChat() reloads the conversation
+    // for a contact; without this the in-flight flags (aiBusy/replyBusy) and
+    // the timers leak across a contact switch, leaving the header stuck on
+    // "正在输入" forever and silently swallowing every later message.
+    function resetSendState() {
+        mergeTimer.stop()
+        readTimer.stop()
+        typingTimer.stop()
+        replyTimer.stop()
+        chatPage.sendBuffer = []
+        chatPage.replyQueue = []
+        chatPage.pendingMerged = ""
+        chatPage.pendingSendText = ""
+        chatPage.pendingReadRows = []
+        chatPage.pendingReply = ""
+        chatPage.typingRow = -1
+        chatPage.replyBusy = false
+        chatPage.aiBusy = false
+        chatPage.setHeaderStatus("在线")
+    }
+
     function loadChat(contactId) {
         var db = chatDb()
         db.transaction(function(tx) {
@@ -64,12 +85,10 @@ Rectangle {
                     timeLabel = fmtTime(ts)
                 if (ts > 0) prevTs = ts
                 msgModel.append({ "isAi": isAi, "msg": msg, "timeLabel": timeLabel, "grouped": false, "ts": ts, "receipt": "" })
-                hist.push((isAi ? aiService.aiName() : (aiService.userName() || "用户")) + ": " + msg)
+                hist.push((isAi ? aiService.aiName() : "用户") + ": " + msg)
             }
             chatPage.lastMsgTs = prevTs
-            chatPage.typingRow = -1
-            chatPage.pendingReadRows = []
-            chatPage.pendingSendText = ""
+            chatPage.resetSendState()
             // seed AI context with this conversation so it can see past messages
             aiService.setChatHistory(hist.join("\n"))
         })
@@ -151,7 +170,7 @@ Rectangle {
         for (var i = start; i < msgModel.count; i++) {
             var m = msgModel.get(i)
             if (m.isAi && m.msg === "...") continue   // typing placeholder, not a real message
-            var who = m.isAi ? aiService.aiName() : (aiService.userName() || "用户")
+            var who = m.isAi ? aiService.aiName() : "用户"
             out.push(who + ": " + m.msg)
         }
         return out
