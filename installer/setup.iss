@@ -16,7 +16,10 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 ; output into the script directory (repo-local, no hardcoded machine paths)
 OutputDir=.
-OutputBaseFilename=Solace-{#MyAppVersion}-setup
+; generic name on purpose: the updater locates the installer by "Solace-*-setup.exe"
+; or "setup.exe". Keeping it "setup.exe" lets pre-rename clients (which only match
+; "XiaoQinTools-*-setup.exe" or "setup.exe") auto-update into Solace too.
+OutputBaseFilename=setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
