@@ -56,12 +56,15 @@ Rectangle {
             }
         }
 
-        // content box: only shown when there is real content
+        // content box: a refined inset — darker than the card, with a hairline
+        // border — not the washed default input fill (the "cheap" look)
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: outText.implicitHeight + Theme.sp2 * 2
-            color: Theme.inputBg
+            Layout.preferredHeight: outText.implicitHeight + Theme.sp3 * 2
+            color: Theme.outputBg
             radius: Theme.rMd
+            border.color: Theme.outputBorder
+            border.width: 1
             visible: !root.busy && root.text.length > 0
 
             Text {
@@ -72,9 +75,10 @@ Rectangle {
                 color: Theme.text
                 font.pixelSize: Theme.fsSmall
                 font.family: "Consolas"
+                lineHeight: 1.35
                 wrapMode: Text.Wrap
                 text: root.text
-                padding: Theme.sp2
+                padding: Theme.sp3
                 // fade-in on new results (state change feedback)
                 opacity: 1
                 Behavior on opacity { NumberAnimation { duration: Theme.durMid } }
@@ -86,8 +90,10 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 56
-            color: Theme.inputBg
+            color: Theme.outputBg
             radius: Theme.rMd
+            border.color: Theme.outputBorder
+            border.width: 1
             visible: root.busy || root.text.length === 0
             Text {
                 anchors.centerIn: parent
