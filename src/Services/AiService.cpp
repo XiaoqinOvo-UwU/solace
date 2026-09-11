@@ -40,6 +40,7 @@
 #include <QFutureWatcher>
 #include <QTimer>
 #include <QMap>
+#include <QPair>
 #include <QRandomGenerator>
 #include <algorithm>
 
@@ -1810,6 +1811,54 @@ void AiService::clearMemory()
     m_userTurns = 0;
 }
 
+// ---- v5.0 Memory Core helpers (heuristic annotation fallbacks) ----
+namespace {
+
+// deterministic fallback used whenever the structured LLM pass is missing
+// or returns something unparsable
+QString coreCategoryOf(const QString &t)
+{
+    static const QVector<QPair<QStringList, QString>> table = {
+        {{"solace", "小钦", "项目", "开发", "代码", "编程", "工具", "qt", "bug"}, "project"},
+        {{"学习", "考试", "论文", "作业", "上课", "复习"}, "study"},
+        {{"工作", "上班", "会议", "加班", "客户", "同事"}, "work"},
+        {{"睡", "熬夜", "健康", "生病", "医院", "吃药", "锻炼", "健身", "休息"}, "health"},
+        {{"朋友", "家人", "同学", "聚会", "一起", "见面"}, "social"},
+        {{"游戏", "动漫", "音乐", "小说", "电影", "追剧", "minecraft"}, "interest"},
+        {{"开心", "难过", "压力", "孤独", "情绪", "焦虑", "很累", "烦"}, "emotion"},
+        {{"习惯", "每天", "经常", "总是", "坚持"}, "habit"},
+    };
+    const QString low = t.toLower();
+    for (const auto &row : table)
+        for (const QString &k : row.first)
+            if (low.contains(k)) return row.second;
+    return QStringLiteral("life");
+}
+
+QString coreRelationshipFor(const QString &category, const QString &emotion)
+{
+    if (emotion == "lonely" || emotion == "sad")       return "陪伴";
+    if (emotion == "stressed" || emotion == "tired")   return "需要安慰";
+    if (emotion == "angry")                            return "需要倾听";
+    if (emotion == "happy" || emotion == "excited")    return "分享喜悦";
+    if (emotion == "question" || emotion == "curious") return "想交流";
+    if (category == "project")                         return "关注进展";
+    if (category == "health")                          return "关心健康";
+    if (category == "social")                          return "在意你的关系";
+    return QStringLiteral("留意近况");
+}
+
+// pull a JSON object out of an LLM answer (tolerates prose / code fences)
+QJsonObject extractJsonObject(const QString &raw)
+{
+    const int a = raw.indexOf('{');
+    const int b = raw.lastIndexOf('}');
+    if (a < 0 || b <= a) return QJsonObject();
+    return QJsonDocument::fromJson(raw.mid(a, b - a + 1).toUtf8()).object();
+}
+
+} // namespace
+
 // ---- auto memory: after 3+ user turns, condense the recent chat into a short note ----
 void AiService::trackChatTurn(const QString &userText, const QString &aiReply)
 {
@@ -1837,14 +1886,29 @@ void AiService::maybeSummarize()
 
     QString chat = m_chatBuffer.join("\n");
     QString prompt = "下面是用户与AI的一段对话：\n\n" + chat
-        + "\n\n请用最多 2 句话，简短提炼对话中值得长期记住的关于用户的信息"
-          "（喜好、习惯、重要事件、情绪、近况等）。如果没什么值得记的，只输出「无」。"
-          "只输出提炼内容本身，不要解释。";
+        + "\n\n请提炼其中值得长期记住的关于用户的信息（喜好、习惯、重要事件、情绪、近况等），"
+          "并判断它为什么重要。只输出一个 JSON 对象，不要解释、不要代码块，格式：\n"
+          "{\"note\":\"不超过2句话的提炼\","
+          "\"category\":\"project|work|study|habit|health|social|interest|emotion|life\","
+          "\"emotion\":\"用户当时的情绪(如 happy/sad/stressed/lonely/tired/excited/normal)\","
+          "\"relationship\":\"此刻的关系需求(如 需要鼓励/陪伴/需要安慰/分享喜悦/关注进展)\","
+          "\"importance\":0.0,\"confidence\":0.0}\n"
+          "如果确实没有值得记的，只输出 {\"note\":\"无\"}。";
     auto *watcher = new QFutureWatcher<QString>(this);
     connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher]() {
-        QString note = watcher->result().trimmed();
+        const QString raw = watcher->result().trimmed();
         watcher->deleteLater();
         m_summarizing = false;
+        if (raw.isEmpty()) return;
+
+        // structured answer -> note + why-it-matters fields; fall back to the
+        // raw text (and heuristics) if the model ignored the JSON contract
+        const QJsonObject j = extractJsonObject(raw);
+        QString note = j.value("note").toString().trimmed();
+        if (note.isEmpty()) {
+            if (raw == "无" || raw.startsWith("无")) return;
+            note = raw;
+        }
         if (note.isEmpty() || note == "无") return;
         // v3.9: only worthwhile content enters long-term memory. Even when
         // skipped, the summary stays as a session-only topicSummary so the
@@ -1856,7 +1920,16 @@ void AiService::maybeSummarize()
         }
         // v4.3.1: the AI decides — summaries above the importance threshold
         // enter long-term memory directly (no user review queue).
-        appendNote(note);
+        // v5.0: annotate with the personal-model fields from the same call.
+        CoreMemory core;
+        core.text         = note;
+        core.source       = "note";
+        core.category     = j.value("category").toString().trimmed();
+        core.emotion      = j.value("emotion").toString().trimmed();
+        core.relationship = j.value("relationship").toString().trimmed();
+        core.importance   = j.contains("importance")   ? j.value("importance").toDouble(-1.0)   : -1.0;
+        core.confidence   = j.contains("confidence")   ? j.value("confidence").toDouble(-1.0)   : -1.0;
+        appendNote(note, core);
         qInfo("[memory] stored: %s", qUtf8Printable(note.left(40)));
     });
     QFuture<QString> future = QtConcurrent::run([prompt]() {
@@ -1866,6 +1939,18 @@ void AiService::maybeSummarize()
 }
 
 void AiService::appendNote(const QString &note)
+{
+    // v5.0: no structured annotation available -> let saveCoreMemory fill it
+    // with heuristics (importance/confidence < 0 means "derive it").
+    CoreMemory core;
+    core.text = note;
+    core.source = "note";
+    core.importance = -1.0;
+    core.confidence = -1.0;
+    appendNote(note, core);
+}
+
+void AiService::appendNote(const QString &note, const CoreMemory &core)
 {
     QString mem = readMemory();
     QJsonDocument d = QJsonDocument::fromJson(mem.toUtf8());
@@ -1890,11 +1975,68 @@ void AiService::appendNote(const QString &note)
     notes.append(note + "（" + QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm") + "）");
     o.insert("notes", notes);
     writeMemory(QString::fromUtf8(QJsonDocument(o).toJson()));
+
+    // v5.0 Memory Core: record WHY this matters (personal model), via MemoryStore
+    saveCoreMemory(note, core.source.isEmpty() ? QStringLiteral("note") : core.source,
+                   core.category, core.emotion, core.relationship,
+                   core.importance, core.confidence);
+
     m_userTurns = 0;      // restart the counting window
     // NOTE: do NOT clear m_chatBuffer here — that wiped the current
     // conversation every ~3 turns (auto-summary), causing "short-term amnesia".
     // The recent-chat buffer must survive summarization so the AI keeps the
     // ongoing topic and emotional state.
+}
+
+// ---- v5.0 Memory Core: heuristic annotation + personal-model persistence ----
+
+void AiService::saveCoreMemory(const QString &text, const QString &source,
+                               const QString &category, const QString &emotion,
+                               const QString &relationship, double importance, double confidence)
+{
+    const QString clean = text.trimmed();
+    if (clean.isEmpty()) return;
+
+    CoreMemory r;
+    r.text         = clean;
+    r.source       = source.isEmpty() ? QStringLiteral("note") : source;
+    r.emotion      = emotion.isEmpty() ? inferUserEmotion(clean) : emotion;
+    r.category     = category.isEmpty() ? coreCategoryOf(clean) : category;
+    r.relationship = relationship.isEmpty() ? coreRelationshipFor(r.category, r.emotion) : relationship;
+    if (importance < 0.0) importance = MemoryImportanceEvaluator::importanceScore(clean);
+    if (confidence < 0.0) confidence = (r.source == "note") ? 1.0 : (r.source == "event" ? 0.85 : 0.6);
+    r.importance   = qBound(0.0, importance, 1.0);
+    r.confidence   = qBound(0.0, confidence, 1.0);
+    r.created      = QDateTime::currentDateTime();
+
+    MemoryStore store(memoryPath());
+    store.load();
+    store.add(r);
+    store.save();
+}
+
+QString AiService::personalModelBlock(int maxItems) const
+{
+    MemoryStore store(memoryPath());
+    store.load();
+    QVector<CoreMemory> recs = store.records();
+    if (recs.isEmpty()) return QString();
+
+    std::sort(recs.begin(), recs.end(), [](const CoreMemory &a, const CoreMemory &b) {
+        return a.importance * a.confidence > b.importance * b.confidence;
+    });
+
+    QStringList lines;
+    for (const CoreMemory &r : recs) {
+        if (lines.size() >= maxItems) break;
+        QStringList meta;
+        if (!r.category.isEmpty())      meta << r.category;
+        if (!r.emotion.isEmpty())       meta << QString("情绪:%1").arg(r.emotion);
+        if (!r.relationship.isEmpty())  meta << QString("关系:%1").arg(r.relationship);
+        meta << QString("重要度%1").arg(QString::number(r.importance, 'f', 2));
+        lines << QString("- [%1] %2").arg(meta.join(QStringLiteral(" · ")), r.text.left(120));
+    }
+    return lines.join("\n");
 }
 
 // startup cleanup: collapse duplicate notes (same core ignoring the trailing
@@ -2312,6 +2454,16 @@ void AiService::sendMessage(const QString &text)
         factsText = "（暂无已验证信息，宁可少说不可编造）";
     QString hypsText = m_ctx->hypothesesSection(3);
 
+    // v5.0 Memory Core: why the companion remembers these — turns the reply
+    // from "data analysis" into "relationship" (see ROADMAP v5.0)
+    QString personalModelSection;
+    {
+        const QString pm = personalModelBlock(6);
+        if (!pm.isEmpty())
+            personalModelSection = "【我为什么记得这些】（你自己的长期记忆，带着在意的理由；"
+                                   "可以自然地体现你记得以及它为什么重要，但不要输出字段名或罗列）\n" + pm + "\n";
+    }
+
     // per-turn reply shape: bias hard toward ONE line so it stops always
     // sending two; sometimes allow more so it stays alive/varied.
     QString replyShapeHint;
@@ -2334,6 +2486,7 @@ void AiService::sendMessage(const QString &text)
           "在回应中自然承接上一句，但补充新角度、新细节、新问题，让对话自然延续而非原地打转。\n"
         + "【已验证事实】（只有这里列出的才可以说成确定的事实；除此之外一律不得断言用户行为）\n"
         + factsText + "\n"
+        + personalModelSection
         + "【推测区】（以下只是猜测，最多用'是不是/感觉/我猜'问一句，绝不能当成事实陈述）\n"
         + (hypsText.isEmpty() ? QString("（无）") : hypsText) + "\n"
         + "【事实纪律——代码强制，不可违反】\n"
@@ -2697,6 +2850,9 @@ void AiService::recordEvent(const QString &type, const QString &summary)
     }
     o.insert("events", events);
     writeMemory(QString::fromUtf8(QJsonDocument(o).toJson()));
+
+    // v5.0 Memory Core: mirror the event into the personal model (why it matters)
+    saveCoreMemory(s, QStringLiteral("event"));
 }
 
 // ---- recent event memories for prompt injection ----
