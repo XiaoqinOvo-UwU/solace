@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 #include "UpdateService.h"
@@ -133,7 +133,7 @@ void UpdateService::checkForUpdates()
     if (m_downloading) return;
 
     // GitHub releases API (public repo, no token needed for read).
-    QString api = "https://api.github.com/repos/XiaoqinOvo-UwU/xiaoqintools/releases/latest";
+    QString api = "https://api.github.com/repos/XiaoqinOvo-UwU/solace/releases/latest";
 
     m_lastError.clear();
     m_available = false;
@@ -148,7 +148,7 @@ void UpdateService::checkForUpdates()
 
     QNetworkRequest req;
     req.setUrl(QUrl(api));
-    req.setRawHeader("User-Agent", "XiaoQinTools");
+    req.setRawHeader("User-Agent", "Solace");
     req.setRawHeader("Accept", "application/vnd.github+json");
     // follow 301/302 redirects (repo moved etc.)
     req.setMaximumRedirectsAllowed(5);
@@ -211,10 +211,10 @@ void UpdateService::fetchExpectedHashThenDownload(const QString &url, const QStr
         configureProxy(*m_mgr);
 
     // SHA256SUMS.txt lives at the repo root for the release tag
-    QString sumsUrl = "https://raw.githubusercontent.com/XiaoqinOvo-UwU/xiaoqintools/"
+    QString sumsUrl = "https://raw.githubusercontent.com/XiaoqinOvo-UwU/solace/"
                       + tag + "/SHA256SUMS.txt";
     QNetworkRequest req{ QUrl(sumsUrl) };
-    req.setRawHeader("User-Agent", "XiaoQinTools");
+    req.setRawHeader("User-Agent", "Solace");
     req.setMaximumRedirectsAllowed(5);
     QNetworkReply *reply = m_mgr->get(req);
     // hard timeout: a stalled connection must not leave the flow busy forever
@@ -293,7 +293,7 @@ QString UpdateService::pickFastest(const QStringList &urls, int probeBytes, int 
     for (const QString &u : urls) {
         QNetworkRequest req;
         req.setUrl(QUrl(u));
-        req.setRawHeader("User-Agent", "XiaoQinTools");
+        req.setRawHeader("User-Agent", "Solace");
         // request only the first probeBytes via a Range header
         req.setRawHeader("Range", QString("bytes=0-%1").arg(probeBytes - 1).toUtf8());
 
@@ -337,7 +337,7 @@ void UpdateService::startDownload(const QString &url, const QString &dest,
         configureProxy(*m_mgr);
     QNetworkRequest req;
     req.setUrl(QUrl(url));
-    req.setRawHeader("User-Agent", "XiaoQinTools");
+    req.setRawHeader("User-Agent", "Solace");
     // abort only if NO data flows for 30s — slow-but-moving downloads are safe
     req.setTransferTimeout(30000);
     QNetworkReply *reply = m_mgr->get(req);
@@ -479,7 +479,7 @@ void UpdateService::proceedToInstall(const QString &dest, const QString &expecte
         if (tar.exitStatus() != QProcess::NormalExit || tar.exitCode() != 0)
             return QString();
         // 2) find the installer exe inside the zip
-        QDirIterator it(staging + "/new", QStringList() << "XiaoQinTools-*-setup.exe" << "setup.exe",
+        QDirIterator it(staging + "/new", QStringList() << "Solace-*-setup.exe" << "XiaoQinTools-*-setup.exe" << "setup.exe",
                         QDir::Files, QDirIterator::Subdirectories);
         return it.hasNext() ? it.next() : QString();
     });

@@ -1,4 +1,4 @@
-# XiaoQinTools — Agent Guide
+# Solace — Agent Guide
 
 ## Skill 使用（用户要求）
 
@@ -11,7 +11,7 @@
 
 - 中文交流，回复简洁。
 - **GitHub 发布前必须先征求用户确认**（铁律）。
-- 发布 Release 上传**安装包塞进 zip**（`xiaoqintools-x.y.z-setup.zip` 内含 setup exe），不直传 exe、不传便携 zip。
+- 发布 Release 上传**安装包塞进 zip**（`solace-x.y.z-setup.zip` 内含 setup exe），不直传 exe、不传便携 zip。
 - GitHub key 从本地 `C:\deepseek杂货铺\KEY\Github Key.txt` 读取，不存 key 值；发布时直接读，不问用户要。
 - 改 QML/C++ 用 edit 工具（PowerShell 替换会破坏 UTF-8 中文）。
 - QML 规范：8px 网格、圆角 rXl=14、hover 中性灰、卡片 surface+hairline、禁 emoji 图标、DialogContainer 单一容器。

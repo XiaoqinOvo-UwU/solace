@@ -1,4 +1,4 @@
-# XiaoQinTools（小钦的工具）
+# Solace
 
 一个 Windows 桌面小工具集，核心是一个**能长期记忆、有情绪、会主动找你聊天**的 AI 线上伙伴，另附网络、系统清理、娱乐等实用工具。
 
@@ -18,7 +18,7 @@
 
 ## 截图
 
-![小钦的工具界面](docs/screenshots/app.png)
+![Solace 界面](docs/screenshots/app.png)
 
 ## 编译运行
 
@@ -38,7 +38,7 @@ cmake --build build
 **打包（可选）**
 
 ```powershell
-windeployqt --dir dist build/XiaoQinTools.exe
+windeployqt --dir dist build/Solace.exe
 # 使用 Inno Setup 编译 installer/setup.iss 生成安装包
 ```
 
@@ -47,18 +47,18 @@ windeployqt --dir dist build/XiaoQinTools.exe
 1. 安装后启动程序，进入 **设置 → AI 配置** 填写你自己的 API Key（DeepSeek 或任意 OpenAI 兼容接口）与模型名。
 2. 在侧栏点 AI 卡片开始聊天；设置里可调整外观、壁纸、代理、隐私开关等。
 
-> API Key 只保存在本机 `%APPDATA%\XiaoQinTools`（DPAPI 加密），不会随仓库分发。
+> API Key 只保存在本机 `%APPDATA%\XiaoQinTools`（目录名沿用旧版以保留数据；DPAPI 加密），不会随仓库分发。
 
 ## 下载
 
-见 [Releases](https://github.com/XiaoqinOvo-UwU/xiaoqintools/releases)。请使用应用内自动更新升级，勿手动覆盖 `Program Files`。
+见 [Releases](https://github.com/XiaoqinOvo-UwU/solace/releases)。请使用应用内自动更新升级，勿手动覆盖 `Program Files`。
 
 ## 许可证
 
 本项目基于 **GNU General Public License v3.0** 发布，见 [LICENSE](LICENSE)。
 
 ```
-XiaoQinTools  Copyright (C) 2026  The XiaoQinTools Authors
+Solace  Copyright (C) 2026  The Solace Authors
 ```
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.

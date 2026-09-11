@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 #include "NetworkService.h"
@@ -136,7 +136,7 @@ void NetworkService::fetchJson(const QString &url, const QString &tag)
     if (!m_mgr)
         m_mgr = new QNetworkAccessManager(this);
     QNetworkRequest req{QUrl(url)};
-    req.setRawHeader("User-Agent", "XiaoQinTools");
+    req.setRawHeader("User-Agent", "Solace");
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QNetworkReply *reply = m_mgr->get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply, tag]() {

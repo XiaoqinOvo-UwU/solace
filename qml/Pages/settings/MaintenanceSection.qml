@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 import QtQuick
@@ -19,7 +19,7 @@ SettingsSectionCard {
 
     Text {
         Layout.fillWidth: true
-        text: "更新源：GitHub 公开仓库（xiaoqinnb666/xiaoqintools），无需配置令牌"
+        text: "更新源：GitHub 公开仓库（XiaoqinOvo-UwU/solace），无需配置令牌"
         color: Theme.textDim
         font.pixelSize: 11
         wrapMode: Text.Wrap

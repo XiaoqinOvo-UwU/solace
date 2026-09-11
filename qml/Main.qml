@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 import QtQuick
@@ -18,7 +18,7 @@ ApplicationWindow {
     minimumWidth: 900
     minimumHeight: 600
     visible: true
-    title: "小钦的工具"
+    title: "Solace"
     color: Theme.bg   // opaque — DWM rounds the frameless window corners natively
 
     // frameless: the native title bar is replaced by the custom title strip
@@ -212,7 +212,7 @@ ApplicationWindow {
                 anchors.left: parent.left
                 anchors.leftMargin: 38
                 anchors.verticalCenter: parent.verticalCenter
-                text: "小钦的工具"
+                text: "Solace"
                 color: Theme.textDim
                 font.pixelSize: Theme.fsCaption
                 font.bold: true
@@ -626,7 +626,7 @@ ApplicationWindow {
                     color: "transparent"
                     Text {
                         anchors.centerIn: parent
-                        text: "小钦的工具 v" + updateService.currentVersion()
+                        text: "Solace v" + updateService.currentVersion()
                         color: Theme.navTextDim
                         font.pixelSize: Theme.fsCaption
                     }

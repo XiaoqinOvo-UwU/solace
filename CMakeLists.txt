@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(XiaoQinTools VERSION 4.5.5 LANGUAGES CXX)
+project(Solace VERSION 4.5.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,7 +72,7 @@ set(APP_SOURCES
     src/Services/TopicGenerator.cpp
 )
 
-qt_add_executable(XiaoQinTools WIN32
+qt_add_executable(Solace WIN32
     ${APP_SOURCES}
     qml/Main.qml
     qml/Components/
@@ -82,22 +82,22 @@ qt_add_executable(XiaoQinTools WIN32
 
 # per-compiler warnings/optimisation (no global CMAKE_CXX_FLAGS pollution;
 # -Werror intentionally NOT enabled while legacy warnings remain)
-target_compile_options(XiaoQinTools PRIVATE
+target_compile_options(Solace PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-O2>
     $<$<CXX_COMPILER_ID:MSVC>:/W4;/permissive->
 )
 
 # embed the app icon (cute icon) into the exe
 if(WIN32)
-    target_sources(XiaoQinTools PRIVATE resources/app.rc)
+    target_sources(Solace PRIVATE resources/app.rc)
 endif()
 
-target_compile_definitions(XiaoQinTools PRIVATE
+target_compile_definitions(Solace PRIVATE
     QT_DEPRECATED_WARNINGS
     "NIGHTLOG_VERSION=\"${PROJECT_VERSION}\""
 )
 
-target_link_libraries(XiaoQinTools PRIVATE
+target_link_libraries(Solace PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Quick
@@ -113,7 +113,7 @@ target_link_libraries(XiaoQinTools PRIVATE
 )
 
 # QML deployment
-qt_finalize_executable(XiaoQinTools)
+qt_finalize_executable(Solace)
 
 
 

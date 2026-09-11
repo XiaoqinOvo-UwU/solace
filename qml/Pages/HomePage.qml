@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 import QtQuick
@@ -24,7 +24,7 @@ Page {
     property bool cardUpdating: false   // true only if THIS card started the download
     property string releaseTag: ""
     property var releaseLines: []
-    property string releaseUrl: "https://github.com/XiaoqinOvo-UwU/xiaoqintools/blob/main/CHANGELOG.md"
+    property string releaseUrl: "https://github.com/XiaoqinOvo-UwU/solace/blob/main/CHANGELOG.md"
     property bool releaseLoaded: false
     // embedded summary (source fallback) so the card is never empty offline
     readonly property var fallbackNotes: [
@@ -48,7 +48,7 @@ Page {
     }
     function refreshChangelog() {
         // a dedicated file in the repo is the source of truth for "what changed"
-        netService.fetchJson("https://raw.githubusercontent.com/XiaoqinOvo-UwU/xiaoqintools/main/CHANGELOG.md", "changelog")
+        netService.fetchJson("https://raw.githubusercontent.com/XiaoqinOvo-UwU/solace/main/CHANGELOG.md", "changelog")
     }
     function parseTrending(json) {
         var out = []
@@ -296,7 +296,7 @@ Page {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: page.openUrl("https://github.com/XiaoqinOvo-UwU/xiaoqintools/releases")
+                    onClicked: page.openUrl("https://github.com/XiaoqinOvo-UwU/solace/releases")
                 }
                 ColumnLayout {
                     anchors.fill: parent

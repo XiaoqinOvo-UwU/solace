@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 #include "AiService.h"
@@ -753,8 +753,8 @@ QString AiService::foregroundApp()
     if (len <= 0) return QString();
     QString t = QString::fromWCharArray(buf, len).trimmed();
     if (t.isEmpty()) return QString();
-    // skip our own window title so the AI doesn't think it's "小钦的工具"
-    if (t.contains("小钦的工具")) return QString();
+    // skip our own window title so the AI doesn't think it's "Solace"
+    if (t.contains("Solace")) return QString();
     return t;
 #else
     return QString();

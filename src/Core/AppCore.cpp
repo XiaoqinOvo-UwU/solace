@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 #include "AppCore.h"
@@ -83,9 +83,10 @@ bool AppCore::isProperLocation()
 {
     QString dir = QDir::toNativeSeparators(QCoreApplication::applicationDirPath());
     // recognized locations:
-    //  - installed: ...\Program Files\XiaoQinTools  (or Program Files (x86))
+    //  - installed: ...\Program Files\Solace (or \XiaoQinTools for pre-rename installs)
     //  - dev copy:  C:\XiaoQinTools\dist
-    if (dir.contains("Program Files", Qt::CaseInsensitive) && dir.endsWith("XiaoQinTools"))
+    if (dir.contains("Program Files", Qt::CaseInsensitive)
+        && (dir.endsWith("Solace") || dir.endsWith("XiaoQinTools")))
         return true;
     if (dir.compare("C:\\XiaoQinTools\\dist", Qt::CaseInsensitive) == 0)
         return true;

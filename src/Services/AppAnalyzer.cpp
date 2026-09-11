@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 The XiaoQinTools Authors
-// This file is part of XiaoQinTools, licensed under the GNU GPL v3.0 or
+// Copyright (C) 2026 The Solace Authors
+// This file is part of Solace, licensed under the GNU GPL v3.0 or
 // later. See the LICENSE file for details.
 
 #include "AppAnalyzer.h"
@@ -31,7 +31,7 @@ bool AppAnalyzer::isExcluded(const QString &exe, const QString &title)
         "sihost", "taskmgr", "任务管理器", "控制面板", "nvidia",
         "startmenuexperiencehost", "shellexperiencehost",
         // our own window + OS settings
-        "小钦的工具", "设置",
+        "Solace", "设置",
         // game-store background clients (not the games themselves)
         "steam",
     };

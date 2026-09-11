@@ -1,9 +1,9 @@
-; 小钦的工具 v4.1.0 安装脚本
-#define MyAppName "小钦的工具"
+; Solace installer script
+#define MyAppName "Solace"
 #define MyAppVersion "4.5.5"
-#define MyAppExeName "XiaoQinTools.exe"
+#define MyAppExeName "Solace.exe"
 #define MyAppPublisher "XiaoQinUwU"
-#define MyAppURL "https://github.com/XiaoqinOvo-UwU/xiaoqintools"
+#define MyAppURL "https://github.com/XiaoqinOvo-UwU/solace"
 
 [Setup]
 AppId={{8F5C3E2A-1B4D-4E7C-9A2B-2F6A4C8E1B7D}
@@ -11,12 +11,12 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-DefaultDirName={autopf}\XiaoQinTools
+DefaultDirName={autopf}\Solace
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 ; output into the script directory (repo-local, no hardcoded machine paths)
 OutputDir=.
-OutputBaseFilename=XiaoQinTools-{#MyAppVersion}-setup
+OutputBaseFilename=Solace-{#MyAppVersion}-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -59,7 +59,8 @@ begin
 
   cands := TStringList.Create;
   try
-    // 只列 {autopf} 下的旧安装目录候选
+    // 只列 {autopf} 下的旧安装目录候选（含改名前的 XiaoQinTools，用于清理旧版）
+    cands.Add(ExpandConstant('{autopf}') + '\Solace');
     cands.Add(ExpandConstant('{autopf}') + '\XiaoQinTools');
     cands.Add(ExpandConstant('{autopf}') + '\XiaoQinTools_test');
     cands.Add(ExpandConstant('{autopf}') + '\xiaoqintools');
@@ -67,7 +68,7 @@ begin
     for i := 0 to cands.Count - 1 do begin
       subDir := cands[i];
       if DirExists(subDir) then begin
-        if FileExists(subDir + '\XiaoQinTools.exe') then begin
+        if FileExists(subDir + '\Solace.exe') or FileExists(subDir + '\XiaoQinTools.exe') then begin
           if LowerCase(subDir) <> appDir then begin
             // 保留 %APPDATA% 数据，只删程序目录
             DelTree(subDir, True, True, True);
