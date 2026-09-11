@@ -48,17 +48,18 @@ QtObject {
     // input hairline + focus border (white ring is invisible on white glass,
     // so glass mode switches to the accent)
     readonly property color inputBorder: glassMode
-             ? Qt.rgba(0, 0, 0, 0.18)
-             : Qt.rgba(255,255,255,0.08)
+             ? Qt.rgba(1, 1, 1, 0.14)
+             : Qt.rgba(255,255,255,0.06)
     readonly property color inputFocusBorder: glassMode ? accent : focusRing
 
     // ---- glass-mode variants (referenced by the appearance block below) ----
     // Glass mode: WHITE text on the grey-tinted frosted glass (readability).
     // NOTE: sidebar/navigation KEEPS its dark colour in every mode (user rule).
     readonly property color sidebar:     "#0A0B0E"
-    readonly property color inputBg:     glassMode
-             ? Qt.rgba(1, 1, 1, 0.09)
-             : "#212429"
+    // inputs share the SAME inset fill as the result panels (outputBg) so every
+    // field looks identical — no more per-field "default fill"
+    readonly property color inputBg:     glassMode ? Qt.rgba(0, 0, 0, 0.30)
+             : wallpaperActive ? Qt.rgba(12/255, 12/255, 12/255, 0.72) : "#141619"
     readonly property color text:        glassMode ? "#FFFFFF" : "#F2F3F5"
     readonly property color textDim:     glassMode ? Qt.rgba(1,1,1,0.75) : "#9BA0A8"
     readonly property color textMuted:   glassMode ? Qt.rgba(1,1,1,0.65) : "#B6BAC1"
@@ -180,10 +181,8 @@ QtObject {
              ? Qt.rgba(1, 1, 1, 0.27)
              : wallpaperActive ? Qt.rgba(255,255,255,0.10) : Qt.rgba(1,1,1,0.12)
 
-    // ---- inputs: frosted glass (tinted) ----
-    readonly property color inputFill: glassMode
-             ? Qt.rgba(1, 1, 1, 0.09)
-             : wallpaperActive ? Qt.rgba(28/255, 28/255, 28/255, 0.95) : Theme.inputBg
+    // ---- inputs: same inset fill as the result panels (unified) ----
+    readonly property color inputFill: inputBg
 
     // ---- chat: wallpaper shows through on glass ----
     readonly property color chatBg: glassMode
