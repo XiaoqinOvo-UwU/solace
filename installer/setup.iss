@@ -1,6 +1,6 @@
 ; Solace installer script
 #define MyAppName "Solace"
-#define MyAppVersion "4.6.4"
+#define MyAppVersion "5.0.0"
 #define MyAppExeName "Solace.exe"
 #define MyAppPublisher "XiaoQinUwU"
 #define MyAppURL "https://github.com/XiaoqinOvo-UwU/solace"
