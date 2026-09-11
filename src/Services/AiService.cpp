@@ -1349,6 +1349,7 @@ QStringList AiService::fetchAvailableModels(const QString &baseUrl, const QStrin
         QNetworkRequest req(QUrl(base + "/chat/completions"));
         req.setRawHeader("Authorization", ("Bearer " + key).toUtf8());
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        req.setTransferTimeout(4000);   // per-probe cap -> every reply finishes
         QNetworkReply *reply = mgr.post(req, QJsonDocument(body).toJson());
         replies << reply;
         replyToId.insert(reply, id);
@@ -1370,8 +1371,10 @@ QStringList AiService::fetchAvailableModels(const QString &baseUrl, const QStrin
             onDone();
         });
     }
-    // global cap so a hung channel can't stall the whole list
-    QTimer::singleShot(4000, &loop, [&loop]() { loop.quit(); });
+    // each probe has its own transfer timeout, so a hung channel resolves as a
+    // failure on its own and EVERY reply finishes before the loop exits — no
+    // global timer that could fire after the loop (and the per-reply buffers)
+    // are gone (that was a use-after-free window).
     loop.exec();
 
     for (int i = 0; i < replies.size(); ++i) {
@@ -2850,13 +2853,14 @@ QString AiService::postChatCompletion(const QJsonArray &messages)
     QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
     loop.exec();
 
-    const QByteArray data = reply->readAll();
     const QNetworkReply::NetworkError netErr = reply->error();
     const QString netErrStr = reply->errorString();
-    reply->deleteLater();
-
-    if (netErr != QNetworkReply::NoError)
+    if (netErr != QNetworkReply::NoError) {
+        reply->deleteLater();
         return "（请求失败：" + netErrStr + "）";
+    }
+    const QByteArray data = reply->readAll();
+    reply->deleteLater();
     QJsonParseError pe;
     const QJsonDocument resp = QJsonDocument::fromJson(data, &pe);
     if (pe.error != QJsonParseError::NoError || !resp.isObject())
