@@ -140,10 +140,12 @@ ApplicationWindow {
 
     // refresh profile labels after edit
     function refreshProfile() {
-        userAvatarText.text = aiService.avatarChar()
-        userNameText.text = aiService.userName()
         root.aiAvatarPath = toFileUrl(aiService.aiAvatarPath())
         root.userAvatarPath = toFileUrl(aiService.userAvatarPath())
+        // set the avatar label AFTER the path is known, and keep it empty when
+        // an image is set — otherwise the fallback char draws over the avatar
+        userAvatarText.text = root.userAvatarPath.length > 0 ? "" : aiService.avatarChar()
+        userNameText.text = aiService.userName()
         refreshContacts()
     }
 

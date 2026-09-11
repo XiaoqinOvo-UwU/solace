@@ -87,6 +87,38 @@ QString ResponseValidator::neutralizeDrift(const QString &s, int *countOut)
     return out;
 }
 
+// 3) prompt-leak guard: the model must never echo the system rules back.
+//    Natural companion chat never contains section markers (【】), circled
+//    enumerators, or the internal rule vocabulary — any such line is a leaked
+//    instruction, not a reply, and is hard-dropped.
+QString ResponseValidator::stripPromptLeakage(const QString &s, int *countOut)
+{
+    static const QRegularExpression circled(QStringLiteral("^[\\x{2460}-\\x{2473}]"));
+    static const QStringList markers = {
+        QStringLiteral("【"), QStringLiteral("】"),
+        QStringLiteral("代码强制"), QStringLiteral("务必遵守"),
+        QStringLiteral("本回合"), QStringLiteral("本轮"),
+        QStringLiteral("回复长度"), QStringLiteral("replyShape"),
+        QStringLiteral("已验证事实"), QStringLiteral("事实纪律"),
+        QStringLiteral("角色边界"), QStringLiteral("交流方式"),
+        QStringLiteral("最高优先级"),
+    };
+    QStringList kept;
+    int n = 0;
+    for (const QString &line : s.split('\n')) {
+        bool leak = circled.match(line.trimmed()).hasMatch();
+        if (!leak) {
+            for (const QString &m : markers) {
+                if (line.contains(m)) { leak = true; break; }
+            }
+        }
+        if (leak) { ++n; continue; }
+        kept << line;
+    }
+    if (countOut) *countOut = n;
+    return kept.join('\n').trimmed();
+}
+
 QString ResponseValidator::stripControlTokens(const QString &raw)
 {
     // known control tokens with an OPTIONAL payload:
@@ -234,6 +266,9 @@ ResponseValidator::Result ResponseValidator::validate(const QString &raw, const 
     // ---- v4.3 outbound guards ----
     s = stripGuiltPressure(s, &r.guiltStripped);
     s = neutralizeDrift(s, &r.driftRepaired);
+
+    // ---- v4.6.2: never let system-prompt text leak to the user ----
+    s = stripPromptLeakage(s, &r.leakageStripped);
 
     s = trimToDialog(s);
     s = s.trimmed();

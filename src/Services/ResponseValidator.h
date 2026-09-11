@@ -36,6 +36,7 @@ public:
         int     observationsRepaired = 0;
         int     guiltStripped = 0;       // v4.3: manipulative pressure lines dropped
         int     driftRepaired = 0;       // v4.3: persona-drift phrases neutralized
+        int     leakageStripped = 0;     // v4.6.2: leaked system-prompt lines dropped
     };
 
     // main entry: `verifiedFacts` = the [确定] fact block text used in the
@@ -45,6 +46,10 @@ public:
     // v4.3 outbound guards (public for reuse/tests)
     static QString stripGuiltPressure(const QString &s, int *countOut = nullptr); // 愧疚/施压话术硬拦截
     static QString neutralizeDrift(const QString &s, int *countOut = nullptr);    // 人设漂移话术改写
+
+    // v4.6.2: drop any line that is leaked system-prompt text (section markers,
+    // circled enumerators, internal rule vocabulary) — never a real chat line.
+    static QString stripPromptLeakage(const QString &s, int *countOut = nullptr);
 
     // lightweight helpers (public for reuse/tests)
     static QString stripControlTokens(const QString &raw);   // think/ACT/DELAY
