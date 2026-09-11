@@ -53,6 +53,10 @@ windeployqt --dir dist build/Solace.exe
 
 见 [Releases](https://github.com/XiaoqinOvo-UwU/solace/releases)。请使用应用内自动更新升级，勿手动覆盖 `Program Files`。
 
+## 更多文档
+
+使用 / 架构 / 贡献说明见 [项目 Wiki](https://github.com/XiaoqinOvo-UwU/solace/wiki)。
+
 ## 许可证
 
 本项目基于 **GNU General Public License v3.0** 发布，见 [LICENSE](LICENSE)。
