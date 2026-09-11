@@ -78,7 +78,7 @@ SettingsSectionCard {
         width: Math.max(200, editModel.width)
         property int hoveredMenuIndex: -1
         background: Rectangle {
-            color: Theme.glassMode ? Qt.rgba(1, 1, 1, 0.97) : Theme.surface
+            color: Theme.glassMode ? Qt.rgba(0.12, 0.12, 0.14, 0.96) : Theme.surface
             radius: 8
             border.color: Theme.glassBorder
             border.width: 1

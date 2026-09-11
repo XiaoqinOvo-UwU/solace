@@ -50,7 +50,7 @@ Dialog {
         // wallpaper for white-text readability while keeping a subtle
         // glass translucency. Light frosted (cardFill 14%) let the
         // wallpaper bleed through and made text unreadable.
-        color: Theme.glassMode ? Qt.rgba(0.97, 0.97, 0.99, 0.97) : Theme.cardFill
+        color: Theme.glassMode ? Qt.rgba(0.14, 0.14, 0.16, 0.94) : Theme.cardFill
         radius: Theme.rXl
         border.color: Theme.glassBorder
         border.width: 1

@@ -260,14 +260,10 @@ Page {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: Theme.sp3
-                        TextField {
+                        ThemedTextField {
                             id: input
-                            Layout.fillWidth: true
                             Layout.preferredHeight: 38
-                            color: Theme.text
                             placeholderText: "粘贴 vmess / vless / trojan / ss 链接 或 订阅地址"
-                            placeholderTextColor: Theme.textDim
-                            background: Rectangle { color: Theme.inputBg; radius: Theme.rMd }
                         }
                         AppButton {
                             text: "导入到梯子"
