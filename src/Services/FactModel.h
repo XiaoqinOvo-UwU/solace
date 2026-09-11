@@ -61,6 +61,11 @@ struct Fact
     MemoryStatus status = MemoryStatus::Active; // deprecated/replaced memories are excluded
     QDateTime   lastUsedTime;            // last time this memory helped a reply
 
+    // ---- v5.0 Memory Core: WHY this memory matters (personal model) ----
+    QString     category;      // project / habit / health / social / interest / emotion / ...
+    QString     emotion;       // user emotion at the time (stressed / happy / lonely / ...)
+    QString     relationship;  // the relational need ("需要鼓励" / "想倾诉" / "陪伴")
+
     bool isFact() const { return !rejected && status == MemoryStatus::Active && source != FactSource::Inference; }
     bool isHypothesis() const { return !rejected && source == FactSource::Inference; }
 
@@ -101,6 +106,31 @@ struct Fact
         o.insert("importance", importance);
         o.insert("usageFrequency", usageFrequency);
         o.insert("status", (int)status);
+        if (!category.isEmpty())     o.insert("category", category);
+        if (!emotion.isEmpty())      o.insert("emotion", emotion);
+        if (!relationship.isEmpty()) o.insert("relationship", relationship);
         return o;
+    }
+
+    static Fact fromJson(const QJsonObject &o)
+    {
+        Fact f;
+        f.id              = o.value("id").toString();
+        f.content         = o.value("content").toString();
+        f.confidence      = o.value("confidence").toDouble(0.5);
+        f.timestamp       = QDateTime::fromString(o.value("timestamp").toString(), Qt::ISODate);
+        if (!f.timestamp.isValid()) f.timestamp = QDateTime::currentDateTime();
+        f.rejected        = o.value("rejected").toBool(false);
+        f.correctionCount = o.value("corrections").toInt(0);
+        for (const QJsonValue &t : o.value("tags").toArray())
+            f.tags << t.toString();
+        f.importance      = o.value("importance").toDouble(-1.0);
+        f.usageFrequency  = o.value("usageFrequency").toDouble(0.0);
+        f.status          = (MemoryStatus)o.value("status").toInt((int)MemoryStatus::Active);
+        f.category        = o.value("category").toString();
+        f.emotion         = o.value("emotion").toString();
+        f.relationship    = o.value("relationship").toString();
+        // source/memKind are derived (kept default: Memory/Summary) — callers set them
+        return f;
     }
 };

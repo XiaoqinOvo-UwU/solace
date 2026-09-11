@@ -37,6 +37,8 @@ set(APP_SOURCES
     src/Services/FactModel.h
     src/Services/MemoryRetriever.h
     src/Services/MemoryRetriever.cpp
+    src/Services/MemoryStore.h
+    src/Services/MemoryStore.cpp
     src/Services/MemoryImportanceEvaluator.h
     src/Services/MemoryImportanceEvaluator.cpp
     src/Services/MemoryConflictManager.h
