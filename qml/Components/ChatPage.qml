@@ -71,7 +71,7 @@ Rectangle {
         // if this contact has no history yet, show a greeting bubble
         if (msgModel.count === 0)
             msgModel.append({ "isAi": true, "msg": "你好，我是" + aiService.aiName() + "。", "timeLabel": "", "grouped": false, "ts": Date.now(), "receipt": "" })
-        msgView.atBottom = true
+        msgView.stick = true
         Qt.callLater(function() { if (msgView) msgView.pinBottom() })
     }
 
@@ -298,38 +298,40 @@ Rectangle {
             spacing: 8
             model: msgModel
             // ---- bottom-following -------------------------------------------
-            // atBottom: true when the viewport is (near) the end of the list.
-            // Drives the "↓" jump button and auto-follow. Recomputed from
-            // contentY, so it tracks wheel and programmatic scroll alike. The
-            // epsilon is generous so the button doesn't linger at the end.
-            property bool atBottom: true
-            // small epsilon: leaving the very end by a few px already stops
-            // following, so a scroll-up is never yanked back
-            readonly property real bottomEpsilon: 8
+            // stick=true means "keep following new content". It flips false the
+            // instant the user scrolls UP (direction-based, not just distance),
+            // so new messages auto-scroll only while parked at the end, and a
+            // scroll-up is never yanked back. We pin explicitly at real
+            // content-change sites (new message / reply reveal) via
+            // followBottom() — never on contentHeightChanged (delegate churn
+            // during a scroll made that oscillate).
+            property bool stick: true
+            property real _lastY: 0
+            readonly property real bottomEpsilon: 24
 
-            function recomputeAtBottom() {
-                atBottom = contentHeight <= height + bottomEpsilon
-                        || (contentY + height) >= (contentHeight - bottomEpsilon)
+            function recomputeStick() {
+                var dist = contentHeight - contentY - height
+                if (contentHeight <= height + bottomEpsilon || dist <= bottomEpsilon)
+                    stick = true
+                else if (contentY < _lastY - 2)   // moved up -> user is browsing
+                    stick = false
+                _lastY = contentY
             }
 
             // jump to the newest message and resume following
-            function pinBottom() {
-                atBottom = true
+            function pinBottom() { stick = true; positionViewAtEnd() }
+
+            // follow new content while the user is at the end; pins now AND after
+            // the layout pass so a wrapped-text reveal is covered too.
+            function followBottom() {
+                if (!stick) return
                 positionViewAtEnd()
+                Qt.callLater(function() { if (msgView.stick) msgView.positionViewAtEnd() })
             }
 
-            onContentYChanged: recomputeAtBottom()
-            onMovementEnded: recomputeAtBottom()
-            // follow NEW messages only (a model count change) while parked at
-            // the end. Deliberately NOT on contentHeightChanged: scrolling up
-            // makes the ListView create/recycle delegates, which changes
-            // contentHeight every frame — pinning on that used to yank the view
-            // straight back to the bottom. (Same pattern as Element/Stream chat:
-            // scroll-to-bottom on new-message, never on layout churn.)
-            onCountChanged: {
-                if (atBottom)
-                    Qt.callLater(function() { if (msgView.atBottom) msgView.positionViewAtEnd() })
-            }
+            onContentYChanged: recomputeStick()
+            onMovementEnded: recomputeStick()
+            onCountChanged: followBottom()
             delegate: Item {
                 id: delegateRoot
                 width: msgView.width
@@ -630,7 +632,7 @@ Rectangle {
         anchors.rightMargin: 16
         anchors.bottom: parent.bottom
         anchors.bottomMargin: inputBar.height + 10
-        opacity: !msgView.atBottom && msgView.count > 0 ? 1 : 0
+        opacity: !msgView.stick && msgView.count > 0 ? 1 : 0
         scale: opacity > 0 ? 1 : 0.6
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -687,7 +689,7 @@ Rectangle {
         if (msgModel.count > 0 && !msgModel.get(msgModel.count - 1).isAi)
             grouped = true
         // sending always jumps to the newest message and resumes following
-        msgView.atBottom = true
+        msgView.stick = true
         msgModel.append({ "isAi": false, "msg": t, "timeLabel": timeLabel, "grouped": grouped, "ts": now, "receipt": "" })
         chatPage.pendingReadRows.push(msgModel.count - 1)
 
@@ -883,8 +885,7 @@ Rectangle {
             chatPage.clearReceipts()
             // the reveal grew the bubble (wrapped text) without changing the
             // model count, so follow explicitly if the user is still at the end
-            if (msgView.atBottom && !msgView.moving)
-                Qt.callLater(function() { if (msgView.atBottom) msgView.positionViewAtEnd() })
+            chatPage.followBottom()
             // persistence (best-effort)
             try {
                 var cid = chatPage.currentContactId.length > 0 ? chatPage.currentContactId : contactService.currentId()
