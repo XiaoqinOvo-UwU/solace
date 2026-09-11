@@ -2015,15 +2015,24 @@ void AiService::saveCoreMemory(const QString &text, const QString &source,
     store.save();
 }
 
-QString AiService::personalModelBlock(int maxItems) const
+QString AiService::personalModelBlock(int maxItems, const QString &currentEmotion) const
 {
     MemoryStore store(memoryPath());
     store.load();
     QVector<CoreMemory> recs = store.records();
     if (recs.isEmpty()) return QString();
 
-    std::sort(recs.begin(), recs.end(), [](const CoreMemory &a, const CoreMemory &b) {
-        return a.importance * a.confidence > b.importance * b.confidence;
+    // rank by importance*confidence, but lift memories whose emotion matches
+    // how the user feels right now — "when you're stressed, remember the times
+    // you were stressed" is the line between data analysis and a relationship.
+    auto rank = [&currentEmotion](const CoreMemory &r) {
+        double s = r.importance * r.confidence;
+        if (!currentEmotion.isEmpty() && currentEmotion != "normal" && r.emotion == currentEmotion)
+            s += 0.35;
+        return s;
+    };
+    std::sort(recs.begin(), recs.end(), [&rank](const CoreMemory &a, const CoreMemory &b) {
+        return rank(a) > rank(b);
     });
 
     QStringList lines;
@@ -2458,7 +2467,7 @@ void AiService::sendMessage(const QString &text)
     // from "data analysis" into "relationship" (see ROADMAP v5.0)
     QString personalModelSection;
     {
-        const QString pm = personalModelBlock(6);
+        const QString pm = personalModelBlock(6, emotion);
         if (!pm.isEmpty())
             personalModelSection = "【我为什么记得这些】（你自己的长期记忆，带着在意的理由；"
                                    "可以自然地体现你记得以及它为什么重要，但不要输出字段名或罗列）\n" + pm + "\n";
@@ -2851,8 +2860,9 @@ void AiService::recordEvent(const QString &type, const QString &summary)
     o.insert("events", events);
     writeMemory(QString::fromUtf8(QJsonDocument(o).toJson()));
 
-    // v5.0 Memory Core: mirror the event into the personal model (why it matters)
-    saveCoreMemory(s, QStringLiteral("event"));
+    // v5.0 Memory Core: mirror the event into the personal model (why it matters).
+    // the event `type` (e.g. "milestone"/"mood") becomes the category.
+    saveCoreMemory(s, QStringLiteral("event"), type);
 }
 
 // ---- recent event memories for prompt injection ----

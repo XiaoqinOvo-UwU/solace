@@ -226,7 +226,7 @@ private:
                         const QString &emotion = QString(),
                         const QString &relationship = QString(),
                         double importance = -1.0, double confidence = -1.0);
-    QString personalModelBlock(int maxItems = 6) const;   // prompt-ready "why it matters" lines
+    QString personalModelBlock(int maxItems = 6, const QString &currentEmotion = QString()) const; // prompt-ready "why it matters" lines
     QStringList m_chatBuffer;   // recent turns (user/ai pairs), bounded
     int m_userTurns = 0;        // user messages since last summary
     bool m_summarizing = false;
