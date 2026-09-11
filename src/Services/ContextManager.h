@@ -28,7 +28,8 @@ public:
     void addSystemData(const QString &content, double confidence, const QStringList &tags = {});
     void addMemoryFact(const QString &content, MemoryKind kind, const QStringList &tags = {},
                        double importance = -1.0, double usage = 0.0,
-                       MemoryStatus status = MemoryStatus::Active);
+                       MemoryStatus status = MemoryStatus::Active,
+                       const QString &category = QString(), const QString &emotion = QString());
     void addHypothesis(const QString &content, double confidence, const QStringList &tags = {});
 
     void addFact(const Fact &f);                 // generic insert (dedupe by id)
@@ -36,7 +37,9 @@ public:
 
     // ---- memory recall (score-based, returns most relevant first) ----
     // `userMsg` = current user message, `topic` = current conversation topic.
-    QList<Fact> retrieveMemories(const QString &userMsg, const QString &topic, int max = 6) const;
+    QList<Fact> retrieveMemories(const QString &userMsg, const QString &topic, int max = 6,
+                                 const QString &curCategory = QString(),
+                                 const QString &curEmotion = QString()) const;
 
     // debug: human-readable recall report (for logs / tests)
     QString recallReport(const QString &userMsg, const QString &topic, int max = 6) const;
@@ -73,7 +76,8 @@ public:
         const QStringList &userRecentFacts) const; // recent user_message facts
 
     // ---- prompt building (used by FactFilter / AiService) ----
-    QString factsSection(int maxFacts, const QString &userMsg = QString(), const QString &topic = QString()) const; // [确定] block
+    QString factsSection(int maxFacts, const QString &userMsg = QString(), const QString &topic = QString(),
+                         const QString &curCategory = QString(), const QString &curEmotion = QString()) const; // [确定] block
     QString hypothesesSection(int maxHypotheses) const; // [推测] block
 
     // total lifetime corrections made this session (for stats/debug)

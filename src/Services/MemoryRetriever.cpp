@@ -139,3 +139,14 @@ double MemoryRetriever::score(const QString &content, MemoryKind kind,
     return semantic * 0.35 + importance * 0.30 + recency * 0.15
            + relationship * 0.15 + usage * 0.05 + strengthBonus;
 }
+
+double MemoryRetriever::contextBoost(const QString &category, const QString &emotion,
+                                     const QString &curCategory, const QString &curEmotion)
+{
+    double boost = 0.0;
+    if (!curCategory.isEmpty() && category == curCategory)
+        boost += 0.15;
+    if (!curEmotion.isEmpty() && curEmotion != "normal" && emotion == curEmotion)
+        boost += 0.20;   // emotional match weighs more than topical
+    return boost;
+}

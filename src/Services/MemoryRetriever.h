@@ -111,4 +111,9 @@ public:
 
     // tag overlap / keyword helper used by relevance
     static bool sharesTerms(const QString &a, const QString &b);
+
+    // v5.0: extra score for a memory whose category/emotion matches the current
+    // context ("when you're stressed, surface the stressed moments").
+    static double contextBoost(const QString &category, const QString &emotion,
+                               const QString &curCategory, const QString &curEmotion);
 };

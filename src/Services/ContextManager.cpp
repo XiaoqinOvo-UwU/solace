@@ -69,7 +69,8 @@ void ContextManager::addSystemData(const QString &content, double confidence, co
 }
 
 void ContextManager::addMemoryFact(const QString &content, MemoryKind kind, const QStringList &tags,
-                                   double importance, double usage, MemoryStatus status)
+                                   double importance, double usage, MemoryStatus status,
+                                   const QString &category, const QString &emotion)
 {
     Fact f;
     f.id = nextId("mem");
@@ -81,6 +82,8 @@ void ContextManager::addMemoryFact(const QString &content, MemoryKind kind, cons
     f.importance = importance;                 // -1 = use kind default at scoring
     f.usageFrequency = usage;
     f.status = status;                         // deprecated/replaced facts are excluded by isFact()
+    f.category = category;                     // v5.0 personal-model fields (recall boost)
+    f.emotion = emotion;
     addFact(f);
 }
 
@@ -127,7 +130,8 @@ QList<Fact> ContextManager::hypotheses() const
     return out;
 }
 
-QList<Fact> ContextManager::retrieveMemories(const QString &userMsg, const QString &topic, int max) const
+QList<Fact> ContextManager::retrieveMemories(const QString &userMsg, const QString &topic, int max,
+                                             const QString &curCategory, const QString &curEmotion) const
 {
     QList<Fact> out;
     for (const Fact &f : m_facts) {
@@ -136,7 +140,8 @@ QList<Fact> ContextManager::retrieveMemories(const QString &userMsg, const QStri
         scored.retrievalScore = MemoryRetriever::score(
             f.content, f.memKind, f.timestamp, f.tags.contains("memory_event"),
             userMsg, topic, f.usageFrequency,
-            f.importance >= 0.0 ? f.importance : -1.0);
+            f.importance >= 0.0 ? f.importance : -1.0)
+            + MemoryRetriever::contextBoost(f.category, f.emotion, curCategory, curEmotion);
         out.append(scored);
     }
     // sort by score desc, take top `max`
@@ -320,7 +325,8 @@ QList<ContextManager::TopicScore> ContextManager::rankTopics(
 }
 
 // ---- prompt sections ----
-QString ContextManager::factsSection(int maxFacts, const QString &userMsg, const QString &topic) const
+QString ContextManager::factsSection(int maxFacts, const QString &userMsg, const QString &topic,
+                                     const QString &curCategory, const QString &curEmotion) const
 {
     // v3.9: distinct labeled blocks so the AI never confuses certainty levels.
     //   【确定事实】 system_data (real-time) > user_message (stated) > USER_FACT/HABIT memory
@@ -336,7 +342,7 @@ QString ContextManager::factsSection(int maxFacts, const QString &userMsg, const
     std::sort(sys.begin(), sys.end(), byConf);
     std::sort(usr.begin(), usr.end(), byConf);
     // memory: reuse the score-based retriever (single source of truth for ranking)
-    QList<Fact> mem = retrieveMemories(userMsg, topic, 20);
+    QList<Fact> mem = retrieveMemories(userMsg, topic, 20, curCategory, curEmotion);
 
     QStringList verified, history, interpreted;
     for (const Fact &f : mem) {

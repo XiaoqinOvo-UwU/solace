@@ -41,6 +41,7 @@
 #include <QTimer>
 #include <QMap>
 #include <QPair>
+#include <QHash>
 #include <QRandomGenerator>
 #include <algorithm>
 
@@ -2416,6 +2417,20 @@ void AiService::sendMessage(const QString &text)
     {
         QJsonDocument d = QJsonDocument::fromJson(mem.toUtf8());
         QJsonObject o = d.isObject() ? d.object() : QJsonObject();
+        // v5.0: category/emotion per memory (from the personal model) so recall
+        // can match the current context, not just keywords.
+        QHash<QString, QPair<QString, QString>> coreMeta;   // text -> (category, emotion)
+        {
+            MemoryStore store(memoryPath());
+            store.load();
+            for (const CoreMemory &r : store.records())
+                coreMeta.insert(r.text, qMakePair(r.category, r.emotion));
+        }
+        auto metaFor = [&coreMeta](const QString &text) -> QPair<QString, QString> {
+            const auto it = coreMeta.constFind(text);
+            return it != coreMeta.constEnd() ? it.value() : qMakePair(QString(), QString());
+        };
+
         QJsonArray notes = o.value("notes").toArray();
         int n = qMin(notes.size(), 40); // bound the session cache, not the recall
         for (int i = 0; i < n; ++i) {
@@ -2429,7 +2444,12 @@ void AiService::sendMessage(const QString &text)
             MemoryStatus st = MemoryConflictManager::isDeprecated(note)
                                   ? MemoryStatus::Deprecated
                                   : MemoryStatus::Active;
-            m_ctx->addMemoryFact(note, k, {"memory_note"}, imp, usage, st);
+            // core.text has no trailing "（timestamp）" — strip it for the lookup
+            QString coreKey = note;
+            const int lp = coreKey.lastIndexOf(QStringLiteral("（"));
+            if (lp > 0) coreKey = coreKey.left(lp);
+            const QPair<QString, QString> meta = metaFor(coreKey);
+            m_ctx->addMemoryFact(note, k, {"memory_note"}, imp, usage, st, meta.first, meta.second);
         }
         QJsonArray evts = o.value("events").toArray();
         int e = qMin(evts.size(), 20);
@@ -2446,6 +2466,9 @@ void AiService::sendMessage(const QString &text)
             evFact.memKind = MemoryKind::MemoryEvent;
             evFact.confidence = 0.85;
             evFact.tags = { "memory_event" };
+            const QPair<QString, QString> meta = metaFor(summary);
+            evFact.category = meta.first;
+            evFact.emotion = meta.second;
             QDateTime dt = QDateTime::fromString(date, "yyyy-MM-dd");
             if (dt.isValid()) evFact.timestamp = dt;
             m_ctx->addFact(evFact);
@@ -2526,7 +2549,7 @@ void AiService::sendMessage(const QString &text)
 
     // FactFilter: code-level guarantee of what can be stated as fact.
     // Score memories against the current message + conversation topic.
-    QString factsText = m_ctx->factsSection(12, text, m_convo->topic);
+    QString factsText = m_ctx->factsSection(12, text, m_convo->topic, coreCategoryOf(text), emotion);
     // v3.9.1: real-time desktop info becomes an allowed fact for this turn only
     if (!desktopInfo.isEmpty())
         factsText += "\n" + desktopInfo;
