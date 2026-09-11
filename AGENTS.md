@@ -7,6 +7,10 @@
 - 代码质量任务：组合 `clean-code` + `refactoring-guru` + `software-architecture`。
 - 简单/琐碎任务不要滥用 skill，判断匹配才加载。
 
+## 方向
+
+- 产品路线图见 `ROADMAP.md`；新功能 / PR 对齐它（当前最高优先：v5.0 Memory Core）。
+
 ## 项目惯例
 
 - 中文交流，回复简洁。
