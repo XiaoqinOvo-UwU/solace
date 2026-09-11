@@ -25,6 +25,8 @@
 #include <QFutureWatcher>
 #include <QtConcurrent>
 #include <QCryptographicHash>
+#include <functional>
+#include <memory>
 
 UpdateService::UpdateService(QObject *parent)
     : QObject(parent)
@@ -133,7 +135,15 @@ void UpdateService::checkForUpdates()
     if (m_downloading) return;
 
     // GitHub releases API (public repo, no token needed for read).
-    QString api = "https://api.github.com/repos/XiaoqinOvo-UwU/solace/releases/latest";
+    const QString official =
+        "https://api.github.com/repos/XiaoqinOvo-UwU/solace/releases/latest";
+    // Some proxy nodes (notably certain foreign exit nodes) can't reach
+    // api.github.com directly, while a GitHub proxy front can. Try the direct
+    // API first, then the same API behind known mirrors.
+    QStringList apis;
+    apis << official
+         << (QStringLiteral("https://gh-proxy.com/") + official)
+         << (QStringLiteral("https://ghproxy.net/") + official);
 
     m_lastError.clear();
     m_available = false;
@@ -146,25 +156,34 @@ void UpdateService::checkForUpdates()
     if (m_mgr->proxy().type() == QNetworkProxy::NoProxy)
         configureProxy(*m_mgr);
 
-    QNetworkRequest req;
-    req.setUrl(QUrl(api));
-    req.setRawHeader("User-Agent", "Solace");
-    req.setRawHeader("Accept", "application/vnd.github+json");
-    // follow 301/302 redirects (repo moved etc.)
-    req.setMaximumRedirectsAllowed(5);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    // abort if the connection stalls with no data flow
-    req.setTransferTimeout(30000);
-    QNetworkReply *reply = m_mgr->get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            m_lastError = "检查失败：" + reply->errorString();
+    auto attempt = std::make_shared<std::function<void(int)>>();
+    *attempt = [this, apis, attempt](int i) {
+        if (i >= apis.size()) {
+            m_lastError = "检查失败：无法访问更新服务器（请检查网络或代理）";
             emit checkFinished(false);
             return;
         }
-        parseLatestRelease(reply->readAll());
-    });
+        QNetworkRequest req;
+        req.setUrl(QUrl(apis[i]));
+        req.setRawHeader("User-Agent", "Solace");
+        req.setRawHeader("Accept", "application/vnd.github+json");
+        // follow 301/302 redirects (repo moved etc.)
+        req.setMaximumRedirectsAllowed(5);
+        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+        // abort if the connection stalls with no data flow (foreign nodes can
+        // be slower to first byte, so allow a little more than before)
+        req.setTransferTimeout(45000);
+        QNetworkReply *reply = m_mgr->get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, i]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                (*attempt)(i + 1); // try the next source
+                return;
+            }
+            parseLatestRelease(reply->readAll());
+        });
+    };
+    (*attempt)(0);
 }
 
 void UpdateService::downloadAndInstall()
@@ -194,7 +213,7 @@ void UpdateService::downloadAndInstall()
     // hash resolution first: release JSON digest (captured at check time) or,
     // failing that, the official SHA256SUMS.txt for this release tag.
     if (!expectedSha256.isEmpty()) {
-        startDownload(url, dest, expectedSha256, true /* official first, mirror fallback */);
+        beginBestDownload(url, dest, expectedSha256);
         return;
     }
     fetchExpectedHashThenDownload(url, dest, tag, assetName);
@@ -211,46 +230,59 @@ void UpdateService::fetchExpectedHashThenDownload(const QString &url, const QStr
         configureProxy(*m_mgr);
 
     // SHA256SUMS.txt lives at the repo root for the release tag
-    QString sumsUrl = "https://raw.githubusercontent.com/XiaoqinOvo-UwU/solace/"
-                      + tag + "/SHA256SUMS.txt";
-    QNetworkRequest req{ QUrl(sumsUrl) };
-    req.setRawHeader("User-Agent", "Solace");
-    req.setMaximumRedirectsAllowed(5);
-    QNetworkReply *reply = m_mgr->get(req);
-    // hard timeout: a stalled connection must not leave the flow busy forever
-    QTimer::singleShot(8000, reply, &QNetworkReply::abort);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, url, dest, assetName]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
+    const QString sumsUrl = "https://raw.githubusercontent.com/XiaoqinOvo-UwU/solace/"
+                            + tag + "/SHA256SUMS.txt";
+    // try the raw source, then the same file behind a proxy front
+    QStringList sources;
+    sources << sumsUrl << (QStringLiteral("https://gh-proxy.com/") + sumsUrl);
+
+    auto attempt = std::make_shared<std::function<void(int)>>();
+    *attempt = [this, sources, attempt, url, dest, assetName](int i) {
+        if (i >= sources.size()) {
             removeUpdateFiles(dest, QString());
             m_downloading = false;
             emit downloadStateChanged();
-            emit downloadFinished(false, "无法从官方源获取校验值（" + reply->errorString() + "），已取消更新");
+            emit downloadFinished(false, "无法从官方源获取校验值，已取消更新（请检查网络或代理）");
             return;
         }
-        // parse "hexhash  filename" lines (strip a possible UTF-8 BOM first)
-        QString content = QString::fromUtf8(reply->readAll());
-        content.remove(QChar(0xFEFF));
-        const QRegularExpression wsRe("\\s+");
-        QString found;
-        for (const QString &rawLine : content.split('\n')) {
-            QString line = rawLine.trimmed();
-            if (line.isEmpty()) continue;
-            QStringList parts = line.split(wsRe);
-            if (parts.size() < 2) continue;
-            QString name = parts.last();
-            if (name.startsWith('*')) name = name.mid(1);
-            if (name == assetName) { found = parts.first().toLower(); break; }
-        }
-        if (found.isEmpty()) {
-            removeUpdateFiles(dest, QString());
-            m_downloading = false;
-            emit downloadStateChanged();
-            emit downloadFinished(false, "官方发布缺少该更新包的校验值，已取消更新（请联系维护者补发 SHA256SUMS）");
-            return;
-        }
-        startDownload(url, dest, found, true);
-    });
+        QNetworkRequest req{ QUrl(sources[i]) };
+        req.setRawHeader("User-Agent", "Solace");
+        req.setMaximumRedirectsAllowed(5);
+        QNetworkReply *reply = m_mgr->get(req);
+        // hard timeout: a stalled connection must not leave the flow busy forever
+        QTimer::singleShot(9000, reply, &QNetworkReply::abort);
+        connect(reply, &QNetworkReply::finished, this,
+                [this, reply, attempt, i, url, dest, assetName]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                (*attempt)(i + 1);
+                return;
+            }
+            // parse "hexhash  filename" lines (strip a possible UTF-8 BOM first)
+            QString content = QString::fromUtf8(reply->readAll());
+            content.remove(QChar(0xFEFF));
+            const QRegularExpression wsRe("\\s+");
+            QString found;
+            for (const QString &rawLine : content.split('\n')) {
+                QString line = rawLine.trimmed();
+                if (line.isEmpty()) continue;
+                QStringList parts = line.split(wsRe);
+                if (parts.size() < 2) continue;
+                QString name = parts.last();
+                if (name.startsWith('*')) name = name.mid(1);
+                if (name == assetName) { found = parts.first().toLower(); break; }
+            }
+            if (found.isEmpty()) {
+                removeUpdateFiles(dest, QString());
+                m_downloading = false;
+                emit downloadStateChanged();
+                emit downloadFinished(false, "官方发布缺少该更新包的校验值，已取消更新（请联系维护者补发 SHA256SUMS）");
+                return;
+            }
+            beginBestDownload(url, dest, found);
+        });
+    };
+    (*attempt)(0);
 }
 
 QStringList UpdateService::mirrorUrlsOnly(const QString &canonical) const
@@ -325,13 +357,45 @@ QString UpdateService::pickFastest(const QStringList &urls, int probeBytes, int 
     return best;
 }
 
-// ---- download from a source, verify SHA-256, then install ----
-void UpdateService::startDownload(const QString &url, const QString &dest,
-                                  const QString &expectedSha256, bool mirrorFallback)
+// ---- pick the fastest source (official + mirrors), then download ----
+void UpdateService::beginBestDownload(const QString &official, const QString &dest,
+                                      const QString &expectedSha256)
 {
     m_progress = 0;
     emit downloadStateChanged();
 
+    QStringList cands;
+    cands << official;
+    cands += mirrorUrlsOnly(official);
+
+    auto *w = new QFutureWatcher<QString>(this);
+    connect(w, &QFutureWatcher<QString>::finished, this,
+            [this, w, cands, dest, expectedSha256]() {
+        const QString best = w->result();
+        w->deleteLater();
+        m_downloadUrls = cands;
+        if (!best.isEmpty()) {          // put the fastest first, keep the rest as fallback
+            m_downloadUrls.removeAll(best);
+            m_downloadUrls.prepend(best);
+        }
+        if (m_downloadUrls.isEmpty()) {
+            m_downloading = false;
+            emit downloadStateChanged();
+            emit downloadFinished(false, "没有可用的下载源，请检查网络或代理");
+            return;
+        }
+        startDownload(m_downloadUrls.takeFirst(), dest, expectedSha256);
+    });
+    // probe all sources on a worker thread; captures only locals
+    QFuture<QString> future = QtConcurrent::run(
+        [cands]() { return pickFastest(cands, 256 * 1024, 4000); });
+    w->setFuture(future);
+}
+
+// ---- download from a source, verify SHA-256, then install ----
+void UpdateService::startDownload(const QString &url, const QString &dest,
+                                  const QString &expectedSha256)
+{
     if (!m_mgr) m_mgr = new QNetworkAccessManager(this);
     if (m_mgr->proxy().type() == QNetworkProxy::NoProxy)
         configureProxy(*m_mgr);
@@ -360,39 +424,25 @@ void UpdateService::startDownload(const QString &url, const QString &dest,
         }
         emit downloadStateChanged();
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, out, dest, expectedSha256, mirrorFallback]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, out, dest, expectedSha256]() {
         out->flush();
         out->close();
         delete out;
         reply->deleteLater();
         emit downloadStateChanged();
 
-        // ---- source failed: only then consider mirrors ----
+        // ---- source failed: try the next candidate (fastest-first list) ----
         if (reply->error() != QNetworkReply::NoError) {
             QFile::remove(dest);
-            if (mirrorFallback) {
-                QStringList mirrors = mirrorUrlsOnly(m_url);
-                auto *w = new QFutureWatcher<QString>(this);
-                connect(w, &QFutureWatcher<QString>::finished, this, [this, w, dest, expectedSha256]() {
-                    QString best = w->result();
-                    w->deleteLater();
-                    if (best.isEmpty()) {
-                        m_downloading = false;
-                        emit downloadStateChanged();
-                        emit downloadFinished(false, "所有下载源均不可用，请检查网络或代理");
-                    } else {
-                        startDownload(best, dest, expectedSha256, false); // mirror: no further fallback
-                    }
-                });
-                // probe mirrors on a worker thread; captures only locals
-                QFuture<QString> future = QtConcurrent::run(
-                    [mirrors]() { return pickFastest(mirrors, 512 * 1024, 5000); });
-                w->setFuture(future);
+            if (!m_downloadUrls.isEmpty()) {
+                const QString next = m_downloadUrls.takeFirst();
+                qWarning("[update] source failed, trying next: %s", qPrintable(next));
+                startDownload(next, dest, expectedSha256);
                 return;
             }
             m_downloading = false;
             emit downloadStateChanged();
-            emit downloadFinished(false, "下载失败：" + reply->errorString());
+            emit downloadFinished(false, "所有下载源均不可用，请检查网络或代理");
             return;
         }
 

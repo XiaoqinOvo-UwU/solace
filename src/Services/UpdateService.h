@@ -10,10 +10,12 @@
 #include <QNetworkReply>
 
 // Auto-update against a GitHub release (public repo).
-// Flow: checkForUpdates() -> latest release tag & exe/zip asset URL;
-//       downloadAndInstall() -> resolve official SHA-256, download
-//       (official first, mirrors only as fallback), verify checksum,
-//       extract/launch installer, quit self.
+// Flow: checkForUpdates() -> latest release tag & exe/zip asset URL
+//       (api.github.com, falling back to a proxy-fronted API when the
+//        direct API is unreachable, e.g. some foreign proxy nodes);
+//       downloadAndInstall() -> resolve official SHA-256, probe the official
+//       source + mirrors and download from the FASTEST, fall back through the
+//       rest, verify checksum, extract/launch installer, quit self.
 // Security: nothing is ever executed unless the downloaded file matches the
 // official checksum fetched from GitHub itself.
 class UpdateService : public QObject
@@ -57,8 +59,12 @@ private:
     // fetch the official SHA-256 (release JSON digest first, then SHA256SUMS.txt)
     void fetchExpectedHashThenDownload(const QString &url, const QString &dest,
                                        const QString &tag, const QString &assetName);
+    // probe the official source + mirrors, then download from the fastest;
+    // remaining candidates stay queued in m_downloadUrls for fallback.
+    void beginBestDownload(const QString &official, const QString &dest,
+                           const QString &expectedSha256);
     void startDownload(const QString &url, const QString &dest,
-                       const QString &expectedSha256, bool mirrorFallback);
+                       const QString &expectedSha256);
     void proceedToInstall(const QString &dest, const QString &expectedSha256);
     static QString sha256OfFile(const QString &path);
     static void removeUpdateFiles(const QString &dest, const QString &staging);
@@ -72,5 +78,6 @@ private:
     bool m_downloading = false; // busy flag covering the ENTIRE flow (probe..install)
     int m_progress = 0;
     int m_lastLoggedProgress = -1;  // progress milestone already logged (debug)
+    QStringList m_downloadUrls;     // remaining download sources (fastest first)
     QNetworkAccessManager *m_mgr = nullptr;
 };
