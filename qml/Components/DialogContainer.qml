@@ -24,6 +24,10 @@ Dialog {
     property int dialogWidth: 560
     property int dialogHeight: 600
 
+    // optional: an item BEHIND the dialog (e.g. the app frame). When set, the
+    // dialog gets a real frosted-glass backdrop instead of a flat fill.
+    property Item backdropSource: null
+
     // children of DialogContainer land here (default property)
     default property alias content: body.data
 
@@ -45,16 +49,29 @@ Dialog {
         NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.durFast; easing.type: Easing.InCubic }
     }
 
-    background: Rectangle {
-        // glass mode: dark frosted at 94% opacity — blocks the bright
-        // wallpaper for white-text readability while keeping a subtle
-        // glass translucency. Light frosted (cardFill 14%) let the
-        // wallpaper bleed through and made text unreadable.
-        color: Theme.glassMode ? Qt.rgba(0.14, 0.14, 0.16, 0.94) : Theme.cardFill
-        radius: Theme.rXl
-        border.color: Theme.glassBorder
-        border.width: 1
+    background: Item {
+        // real blur of whatever sits behind the dialog (skipped when no source)
+        GlassBackdrop {
+            id: backdrop
+            anchors.fill: parent
+            cornerRadius: Theme.rXl
+            backdropSource: root.backdropSource
+        }
+        Rectangle {
+            anchors.fill: parent
+            // with a blurred plate behind, a lighter tint keeps white text
+            // readable; without a source fall back to the previous solid fills
+            color: root.backdropSource !== null
+                 ? Qt.rgba(0.075, 0.08, 0.095, 0.76)
+                 : (Theme.glassMode ? Qt.rgba(0.14, 0.14, 0.16, 0.94) : Theme.cardFill)
+            radius: Theme.rXl
+            border.color: Theme.glassBorder
+            border.width: 1
+        }
     }
+
+    // a modal blocks changes behind it, so one grab per open is enough
+    onOpened: backdrop.update()
 
     header: Rectangle {
         width: root.width

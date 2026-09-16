@@ -258,9 +258,62 @@ Page {
                 }
             }
 
+            // ================= 分区④ 分析与报告 =================
+            SectionLabel { text: "分析与报告" }
+            GridLayout {
+                Layout.leftMargin: Theme.sp1
+                Layout.rightMargin: Theme.sp1
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: Theme.sp5
+                rowSpacing: Theme.sp5
+
+                Card {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 84
+                    clickable: true
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: Theme.sp4
+                        spacing: Theme.sp3
+                        Rectangle {
+                            Layout.preferredWidth: 40
+                            Layout.preferredHeight: 40
+                            radius: Theme.rLg
+                            color: Qt.rgba(1,1,1,0.06)
+                            border.color: Theme.glassBorder
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "报"
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.fsDefault
+                                font.bold: true
+                            }
+                        }
+                        Column {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text { text: "使用报告"; color: Theme.text; font.pixelSize: Theme.fsDefault; font.bold: true }
+                            Text { text: "抽卡 / 心情 / 清理统计"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
+                        }
+                        Text { text: "›"; color: Theme.textDim; font.pixelSize: Theme.fsDefault }
+                    }
+                    onClicked: {
+                        reportDialog.tab = 0
+                        reportDialog.loadData()
+                        reportDialog.open()
+                    }
+                }
+            }
+
             Item { Layout.preferredHeight: Theme.sp6 }
             }
         }
+    }
+
+    ReportDialog {
+        id: reportDialog
     }
 
     // ================= mood dialog (kept as-is) =================

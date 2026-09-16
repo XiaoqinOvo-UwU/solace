@@ -103,7 +103,7 @@ ApplicationWindow {
         function onWallpaperChanged() { root.refreshWallpaper() }
     }
 
-    // contact list model (id|name|hasAvatar)
+    // contact list model (id|name|hasAvatar|pinned)
     ListModel { id: contactModel }
 
     // read the last message of a contact from the chat DB (preview)
@@ -128,13 +128,14 @@ ApplicationWindow {
         var list = contactService.contactList()
         for (var i = 0; i < list.length; i++) {
             var parts = list[i].split("|")
-            if (parts.length >= 3) {
-                var avatarUrl = ""
-                if (parts[2] === "1")
-                    avatarUrl = contactService.contactAvatarUrl(parts[0])
-                var preview = lastMsgFor(parts[0])
-                contactModel.append({ "cid": parts[0], "cname": parts[1], "hasAvatar": parts[2], "avatarUrl": avatarUrl, "lastMsg": preview })
-            }
+            if (parts.length < 4)
+                continue
+            var avatarUrl = ""
+            if (parts[2] === "1")
+                avatarUrl = contactService.contactAvatarUrl(parts[0])
+            contactModel.append({ "cid": parts[0], "cname": parts[1], "hasAvatar": parts[2],
+                                  "pinned": parts[3] === "1",
+                                  "avatarUrl": avatarUrl, "lastMsg": lastMsgFor(parts[0]) })
         }
     }
 
@@ -353,39 +354,58 @@ ApplicationWindow {
                     }
                 }
 
-                // user menu — themed in every appearance mode (Fusion's
-                // default popup is light; Theme.cardFill is 14% white on
-                // glass = text unreadable over a bright wallpaper)
+                // user menu — frosted card: real backdrop blur + hairline border,
+                // grouped with a separator before the destructive action
                 component UserMenuItem : MenuItem {
-                    height: 36
+                    id: menuItem
+                    property bool danger: false
+                    height: 38
                     contentItem: Text {
-                        text: parent.text
-                        color: Theme.text
+                        text: menuItem.text
+                        color: menuItem.danger && menuItem.hovered ? Theme.danger : Theme.text
                         font.pixelSize: Theme.fsDefault
                         verticalAlignment: Text.AlignVCenter
-                        leftPadding: 12
+                        leftPadding: Theme.sp4
+                        Accessible.role: Accessible.MenuItem
+                        Accessible.name: menuItem.text
                     }
                     background: Rectangle {
-                        radius: 6
-                        color: parent.hovered ? Theme.glassHover : "transparent"
+                        radius: Theme.rMd
+                        color: menuItem.hovered
+                             ? (menuItem.danger ? Qt.rgba(0.77, 0.35, 0.35, 0.16) : Theme.glassHover)
+                             : "transparent"
+                        Behavior on color { ColorAnimation { duration: Theme.durFast } }
                     }
                 }
                 Menu {
                     id: userMenu
-                    width: 200
-                    background: Rectangle {
-                        color: Theme.glassMode ? Qt.rgba(0.14, 0.14, 0.16, 0.94) : Theme.cardFill
-                        radius: 10
-                        border.color: Theme.glassBorder
-                        border.width: 1
+                    width: 208
+                    padding: Theme.sp1
+                    background: Item {
+                        GlassBackdrop {
+                            id: menuBackdrop
+                            anchors.fill: parent
+                            cornerRadius: Theme.rLg
+                            backdropSource: rootPanel
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.rLg
+                            // a touch more opaque than a dialog: menus sit on
+                            // small surfaces and must stay crisply readable
+                            color: Qt.rgba(0.075, 0.08, 0.095, 0.86)
+                            border.color: Theme.glassBorder
+                            border.width: 1
+                        }
                     }
+                    onOpened: menuBackdrop.update()
                     UserMenuItem {
                         text: "编 辑资料"
                         onClicked: profileDialog.open()
                     }
                     UserMenuItem {
                         text: "设 置"
-                        onClicked: pageStack.switchPage(4)
+                        onClicked: pageStack.switchPage(3)
                     }
                     UserMenuItem {
                         text: "导 出配置"
@@ -394,8 +414,17 @@ ApplicationWindow {
                             islandToast.show(ok ? "配置已导出到杂货铺" : "导出失败")
                         }
                     }
+                    MenuSeparator {
+                        contentItem: Rectangle {
+                            implicitHeight: 1
+                            color: Theme.glassBorder
+                        }
+                        topPadding: Theme.sp1
+                        bottomPadding: Theme.sp1
+                    }
                     UserMenuItem {
                         text: "退 出"
+                        danger: true
                         onClicked: Qt.quit()
                     }
                 }
@@ -409,6 +438,28 @@ ApplicationWindow {
                 }
 
                 // ================= AI CONTACTS =================
+                // header: label + add
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 14
+                    Layout.rightMargin: Theme.sp3
+                    spacing: Theme.sp2
+                    Text {
+                        text: "AI 联系人"
+                        color: Theme.navTextMuted
+                        font.pixelSize: Theme.fsCaption
+                    }
+                    Item { Layout.fillWidth: true }
+                    IconButton {
+                        glyph: "＋"
+                        tip: "添加 AI 联系人"
+                        btnSize: 22
+                        Layout.preferredWidth: 22
+                        Layout.preferredHeight: 22
+                        onClicked: addContactDialog.open()
+                    }
+                }
+
                 // contact list
                 Repeater {
                     model: contactModel
@@ -422,6 +473,9 @@ ApplicationWindow {
                         // selected contact: only a thin left indicator bar (no full highlight)
                         color: cHover ? Theme.hoverBg : "transparent"
                         property bool cHover: false
+                        // model roles are lexical, not object properties — copy it
+                        // into a real property so the pin toggle can read it
+                        readonly property bool isPinned: pinned
                         Behavior on color { ColorAnimation { duration: 140 } }
 
                         // selected indicator (small vertical bar, like nav tabs)
@@ -505,11 +559,19 @@ ApplicationWindow {
                         }
                         // MouseArea last = on top, so clicks always reach it
                         MouseArea {
+                            id: rowMouse
                             anchors.fill: parent
                             hoverEnabled: true
                             onEntered: contactItem.cHover = true
                             onExited: contactItem.cHover = false
-                            onClicked: {
+                            onClicked: (mouse) => {
+                                // a click on the pin chip only toggles pinning —
+                                // decided here so exactly one action ever fires
+                                if (pinChip.visible
+                                        && pinChip.contains(pinChip.mapFromItem(rowMouse, mouse.x, mouse.y))) {
+                                    contactService.setPinned(cid, !contactItem.isPinned)
+                                    return
+                                }
                                 // open the chat first, then refresh profile:
                                 // setCurrent fires contactsChanged -> refreshProfile (reentrant),
                                 // so chatOpen must come before it or the signal chain breaks.
@@ -518,6 +580,34 @@ ApplicationWindow {
                                 chatPage.openContact(cid)
                                 root.clearUnread()
                                 root.refreshProfile()
+                            }
+                        }
+
+                        // pin toggle — bare glyph in the card's top-right corner
+                        // (no frame/box: a bordered chip read as a stray widget);
+                        // shown on hover, always visible once pinned
+                        Item {
+                            id: pinChip
+                            visible: contactItem.cHover || contactItem.isPinned
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.topMargin: Theme.sp1
+                            anchors.rightMargin: Theme.sp1
+                            width: 18
+                            height: 18
+                            Accessible.role: Accessible.Button
+                            Accessible.name: contactItem.isPinned ? qsTr("取消置顶") : qsTr("置顶")
+                            Text {
+                                anchors.centerIn: parent
+                                text: "↑"
+                                color: contactItem.isPinned || pinHover.hovered ? Theme.navText
+                                     : Theme.navTextDim
+                                font.pixelSize: 12
+                                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+                            }
+                            HoverHandler {
+                                id: pinHover
+                                cursorShape: Qt.PointingHandCursor
                             }
                         }
                     }
@@ -537,7 +627,7 @@ ApplicationWindow {
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: "去「设置 → AI 配置」添加第一个 AI 吧"
+                        text: "点上面的「＋」添加第一个 AI 吧"
                         color: Theme.navTextMuted
                         font.pixelSize: Theme.fsCaption
                     }
@@ -558,7 +648,6 @@ ApplicationWindow {
                     model: ListModel {
                         ListElement { label: "主页" }
                         ListElement { label: "网络" }
-                        ListElement { label: "系统" }
                         ListElement { label: "娱乐" }
                         ListElement { label: "设置" }
                     }
@@ -778,7 +867,6 @@ ApplicationWindow {
 
                 HomePage {}
                 NetworkPage {}
-                SystemPage {}
                 EntertainmentPage {}
                 SettingsPage {}
             }
@@ -855,12 +943,29 @@ ApplicationWindow {
     // ================= AI PROFILE DIALOGS =================
     AiProfileDialogs {
         id: aiProfileDialogs
+        backdropSource: rootPanel
         aiAvatarSource: root.aiAvatarPath
         onToast: (message) => islandToast.show(message)
         onProfileSaved: root.refreshProfile()
         onAvatarPickRequested: {
             fileDialog.avatarTarget = "ai"
             fileDialog.open()
+        }
+    }
+
+    // ================= ADD CONTACT DIALOG =================
+    AddContactDialog {
+        id: addContactDialog
+        backdropSource: rootPanel
+        onCreated: (contactId) => {
+            contactService.setCurrent(contactId)
+            root.refreshContacts()
+            // the chat overlay still holds the PREVIOUS contact's messages —
+            // without this the new AI looks like a copy of the old one
+            if (root.chatOpen)
+                chatPage.openContact(contactId)
+            root.refreshProfile()
+            islandToast.show("已创建新的 AI~")
         }
     }
 
@@ -1035,8 +1140,15 @@ ApplicationWindow {
         target: contactService
         function onContactsChanged() {
             if (root.appReady) {
-                root.refreshContacts()
-                root.refreshProfile()
+                // DEFER the list rebuild: refreshContacts() clears the model, which
+                // destroys the delegate whose click handler is still on the stack
+                // (contact switch / pin toggle). Synchronously doing it killed the
+                // rest of that handler — the chat never switched (records then got
+                // saved to the previous contact) and the card needed two clicks.
+                Qt.callLater(function() {
+                    root.refreshContacts()
+                    root.refreshProfile()
+                })
             }
         }
     }

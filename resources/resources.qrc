@@ -17,6 +17,7 @@
         <file>../qml/Components/SettingCard.qml</file>
         <file>../qml/Components/MessageBubble.qml</file>
         <file>../qml/Components/DialogContainer.qml</file>
+        <file>../qml/Components/GlassBackdrop.qml</file>
         <file>../qml/Components/ProfileHeader.qml</file>
         <file>../qml/Components/SectionLabel.qml</file>
         <file>../qml/Components/StatusBadge.qml</file>
@@ -28,11 +29,11 @@
         <file>../qml/Components/SettingsSectionCard.qml</file>
         <file>../qml/Components/ThemedTextField.qml</file>
         <file>../qml/Components/ProfileEditDialog.qml</file>
+        <file>../qml/Components/AddContactDialog.qml</file>
         <file>../qml/Components/AiProfileDialogs.qml</file>
         <file>../qml/Components/qmldir</file>
         <file>../qml/Pages/HomePage.qml</file>
         <file>../qml/Pages/NetworkPage.qml</file>
-        <file>../qml/Pages/SystemPage.qml</file>
         <file>../qml/Pages/EntertainmentPage.qml</file>
         <file>../qml/Pages/SettingsPage.qml</file>
         <file>../qml/Pages/settings/ProxySection.qml</file>

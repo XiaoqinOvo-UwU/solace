@@ -37,7 +37,7 @@ Rectangle {
 
     radius: Theme.rXl
     // AI bubble: light frosted glass on glass mode (Theme.aiBubbleFill).
-    // User bubble: opaque accent — its text uses Theme.onUserBubble (white).
+    // User bubble: opaque theme token (muted indigo) — its text is white.
     color: isAi ? Theme.aiBubbleFill : Theme.userBubbleFill
     border.color: isAi ? Theme.glassBorder : "transparent"
     border.width: 1

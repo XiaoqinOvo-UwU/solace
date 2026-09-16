@@ -60,6 +60,32 @@ public:
     // ensure a default contact exists (first run)
     void ensureDefault();
 
+    // ---- v5.2: pinned contacts (sidebar keeps them on top) ----
+    Q_INVOKABLE void setPinned(const QString &id, bool pinned);
+    Q_INVOKABLE bool isPinned(const QString &id);
+
+    // ---- v5.2: explicit-id access (a profile edit must never land on another AI) ----
+    Q_INVOKABLE QString nameOf(const QString &id);
+    Q_INVOKABLE QString personalityOf(const QString &id);
+    Q_INVOKABLE void setNameFor(const QString &id, const QString &v);
+    Q_INVOKABLE void setPersonalityFor(const QString &id, const QString &v);
+
+    // ---- v5.2: per-AI internal prompt, two independent variants ----
+    // kind = "chat" (陪聊真人) | "assistant" (个人助理). Each AI keeps both
+    // texts; activePrompt() decides which one is injected into the LLM.
+    Q_INVOKABLE QString currentActivePrompt();                 // "chat" | "assistant"
+    Q_INVOKABLE void setCurrentActivePrompt(const QString &kind);
+    Q_INVOKABLE QString currentPromptText();                   // active variant's text
+    Q_INVOKABLE QString currentPromptTextFor(const QString &kind);
+    Q_INVOKABLE void setCurrentPromptTextFor(const QString &kind, const QString &text);
+    Q_INVOKABLE QString defaultPromptFor(const QString &kind); // preset template
+
+    // id-addressed variants (a profile edit must never touch another AI)
+    Q_INVOKABLE QString activePromptOf(const QString &id);
+    Q_INVOKABLE QString promptTextFor(const QString &id, const QString &kind);
+    Q_INVOKABLE void setPromptTextFor(const QString &id, const QString &kind, const QString &text);
+    Q_INVOKABLE void setActivePromptFor(const QString &id, const QString &kind);
+
 signals:
     void contactsChanged();
 
@@ -75,6 +101,10 @@ private:
         QString scenario;
         QString examples;
         QStringList firstMessages;
+        bool pinned = false;
+        QString promptChat;       // 陪聊真人
+        QString promptAssistant;  // 个人助理
+        QString activePrompt;     // "chat" | "assistant"
     };
     QList<Contact> m_contacts;
     QString m_currentId;

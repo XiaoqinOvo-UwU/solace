@@ -229,9 +229,24 @@ private:
     QString personalModelBlock(int maxItems = 6, const QString &currentEmotion = QString()) const; // prompt-ready "why it matters" lines
     void maybeRecordSharedMoment(const QString &userText, const QString &emotion); // 共同经历 milestones (first / reunion / heart-to-heart)
     static QString postChatCompletion(const QJsonArray &messages);   // shared synchronous LLM POST
+
+    // ---- v5.2: read-only agent tools (network / system / processes / self) ----
+    // Detects a [[tool:id]] directive in the model's raw reply, runs the tool
+    // off-thread, then asks the model for the final in-character answer.
+    // Returns true when it took over the turn (an async path is in flight).
+    bool maybeHandleAgentTool(const QString &raw, const QJsonArray &baseMsgs,
+                              const QString &userText, const QString &emotion,
+                              const QString &factsText);
+
     QStringList m_chatBuffer;   // recent turns (user/ai pairs), bounded
     int m_userTurns = 0;        // user messages since last summary
     bool m_summarizing = false;
+
+    // v5.2: rebind every per-contact path/cache when the active AI changes.
+    // Without this the sidecar files (ledger / conversation state / relationship)
+    // and the chat buffer keep pointing at the PREVIOUS AI.
+    void syncActiveContact();
+    QString m_stateContactId;   // contact the per-contact state is bound to
 
     // activity monitor internals
     void recordActivitySample();      // called by the timer

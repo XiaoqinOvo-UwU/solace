@@ -9,6 +9,7 @@
 #include <QIcon>
 #include <QFont>
 #include <QDir>
+#include <QFile>
 #include <QCoreApplication>
 #include <QtQuickControls2/QQuickStyle>
 #include <QQuickWindow>
@@ -30,6 +31,8 @@
 #include "Services/AiService.h"
 #include "Services/StatsService.h"
 #include "Services/ContactService.h"
+#include "Services/AgentToolRegistry.h"
+#include <QTextStream>
 
 int main(int argc, char *argv[])
 {
@@ -40,6 +43,26 @@ int main(int argc, char *argv[])
     app.setApplicationName("XiaoQinTools");
     app.setApplicationVersion(NIGHTLOG_VERSION);
     app.setWindowIcon(QIcon(":/icons/app.ico"));
+
+    // ---- dev self-check: run every read-only agent tool once and print it ----
+    // usage: Solace.exe --selftest-tools
+    if (app.arguments().contains(QStringLiteral("--selftest-tools"))) {
+        AgentToolRegistry &tools = AgentToolRegistry::instance();
+        QString report = tools.catalogText() + "\n\n";
+        const QStringList ids{QStringLiteral("net.diagnose"), QStringLiteral("sys.info"),
+                              QStringLiteral("sys.processes"), QStringLiteral("app.selfcheck")};
+        for (const QString &id : ids) {
+            const ToolResult result = tools.run(id, QJsonObject());
+            report += "--- " + id + " (ok=" + (result.ok ? "true" : "false") + ") ---\n"
+                    + result.text + "\n\n";
+        }
+        // the app is a WIN32-subsystem binary, so also drop the report on disk
+        QFile reportFile(QDir::tempPath() + QStringLiteral("/solace-selftest.txt"));
+        if (reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            reportFile.write(report.toUtf8());
+        QTextStream(stdout) << report;
+        return 0;
+    }
 
     // ---- single instance guard ----
     // A second instance would hold a stale ConfigService snapshot and its

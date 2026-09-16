@@ -195,8 +195,10 @@ QtObject {
     // dark so white AI text always stays crisp (user rule)
     readonly property color aiBubbleFill: glassMode ? Theme.surface
              : wallpaperActive ? Qt.rgba(37/255, 37/255, 37/255, 0.95) : Theme.surface
-    // user bubble keeps its accent hue (opaque) on both modes
-    readonly property color userBubbleFill: Theme.accent
+// user bubble: muted indigo — desaturated so it reads premium instead of a
+// default system blue; stays opaque in glass mode so white text holds (~8:1)
+readonly property color userBubbleFill: glassMode ? Qt.rgba(0.24, 0.29, 0.42, 0.94)
+                                                  : "#3E4A6B"
     // text on the (accent-coloured) user bubble stays white in every mode
     readonly property color onUserBubble: "#FFFFFF"
 

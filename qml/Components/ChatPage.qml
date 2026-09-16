@@ -105,8 +105,10 @@ Rectangle {
             tx.executeSql("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact TEXT, isAi INTEGER, msg TEXT, ts INTEGER)")
             try { tx.executeSql("ALTER TABLE messages ADD COLUMN ts INTEGER") } catch (e) { }
             tx.executeSql("INSERT INTO messages (contact, isAi, msg, ts) VALUES (?,?,?,?)", [contactId, isAi ? 1 : 0, msg, ts || Date.now()])
-            // keep history bounded (last 400)
-            tx.executeSql("DELETE FROM messages WHERE id NOT IN (SELECT id FROM messages WHERE contact=? ORDER BY id DESC LIMIT 400)", [contactId])
+            // keep THIS contact's history bounded (last 400) — the WHERE clause is
+            // essential: without it the NOT IN cleanup wipes every OTHER contact's
+            // messages on each insert (that is the "records sync/vanished" bug)
+            tx.executeSql("DELETE FROM messages WHERE contact=? AND id NOT IN (SELECT id FROM messages WHERE contact=? ORDER BY id DESC LIMIT 400)", [contactId, contactId])
         })
         chatPage.messageSaved(contactId, isAi, msg)
     }

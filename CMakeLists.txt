@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Solace VERSION 5.1.1 LANGUAGES CXX)
+project(Solace VERSION 5.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,6 +72,11 @@ set(APP_SOURCES
     src/Services/RelationshipState.cpp
     src/Services/TopicGenerator.h
     src/Services/TopicGenerator.cpp
+    src/Services/AgentTool.h
+    src/Services/AgentToolRegistry.h
+    src/Services/AgentToolRegistry.cpp
+    src/Services/AgentTools.h
+    src/Services/AgentTools.cpp
 )
 
 qt_add_executable(Solace WIN32

@@ -19,11 +19,19 @@ Item {
     anchors.fill: parent
 
     property string aiAvatarSource: ""
+    // forwarded to every dialog below so they share the frosted backdrop
+    property Item backdropSource: null
+    // the AI whose profile is open — every write is addressed to this id so a
+    // stale "current contact" can never send an edit to a different AI
+    property string editingContactId: ""
     signal toast(string message)
     signal profileSaved()
     signal avatarPickRequested()
 
-    function openProfile() { aiProfileDialog.open() }
+    function openProfile() {
+        dlg.editingContactId = contactService.currentId()
+        aiProfileDialog.open()
+    }
 
     // =====================================================================
     // AI PROFILE — single unified container (no nested dialogs)
@@ -36,13 +44,31 @@ Item {
         dialogSubtitle: "角色、记忆与关系管理"
         dialogWidth: 600
         dialogHeight: 640
+        backdropSource: dlg.backdropSource
 
         // detail navigation state
-        property int detailPage: 0   // 0=overview, 1..6=detail
+        property int detailPage: 0   // 0=overview, 1..7=detail
+
+        // v5.2: which internal-prompt variant the editor is showing
+        property string promptKind: "chat"
+
+        function loadPrompt(kind) {
+            aiProfileDialog.promptKind = kind
+            promptEdit.text = contactService.promptTextFor(dlg.editingContactId, kind)
+        }
+        function switchPrompt(kind) {
+            if (kind === aiProfileDialog.promptKind)
+                return
+            // keep the edits of the variant we are leaving, then load the other
+            contactService.setPromptTextFor(dlg.editingContactId, aiProfileDialog.promptKind, promptEdit.text)
+            aiProfileDialog.loadPrompt(kind)
+        }
 
         function showDetail(p) {
             aiProfileDialog.detailPage = p
             profileStack.currentIndex = p
+            if (p === 7)
+                aiProfileDialog.loadPrompt(contactService.activePromptOf(dlg.editingContactId))
             aiProfileDialog.dialogTitle = aiProfileDialog.detailTitle(p)
             aiProfileDialog.dialogSubtitle = aiProfileDialog.detailSubtitle(p)
         }
@@ -53,7 +79,7 @@ Item {
             aiProfileDialog.dialogSubtitle = "角色、记忆与关系管理"
         }
         function detailTitle(p) {
-            return ["AI 资料", "AI 人设", "共同经历", "与我的关系", "我的兴趣", "未完成话题", "使用统计"][p]
+            return ["AI 资料", "AI 人设", "共同经历", "与我的关系", "我的兴趣", "未完成话题", "使用统计", "内部提示词"][p]
         }
         function detailSubtitle(p) {
             return ["角色、记忆与关系管理",
@@ -62,7 +88,8 @@ Item {
                     "亲密度和关系设置",
                     "兴趣偏好",
                     "聊天中断的话题",
-                    "陪伴时间"][p]
+                    "陪伴时间",
+                    "陪聊真人 / 个人助理，各存一套"][p]
         }
 
         StackLayout {
@@ -135,6 +162,13 @@ Item {
                         description: "陪伴时间"
                         onClicked: aiProfileDialog.showDetail(6)
                     }
+                    SettingCard {
+                        Layout.fillWidth: true
+                        iconText: "P"
+                        title: "内部提示词"
+                        description: "陪聊真人 / 个人助理"
+                        onClicked: aiProfileDialog.showDetail(7)
+                    }
 
                     Item { Layout.fillHeight: true }
 
@@ -189,7 +223,7 @@ Item {
                     ThemedTextField {
                         id: profileAiName
                         placeholderText: "AI 的名字"
-                        text: aiService.aiName()
+                        text: contactService.nameOf(dlg.editingContactId)
                         onAccepted: saveProfileBtn.clicked()
                     }
                     Text { text: "AI 人设"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
@@ -213,7 +247,7 @@ Item {
                                 width: parent.width - Theme.sp2
                                 height: Math.max(parent.height, implicitHeight)
                                 color: Theme.text
-                                text: aiService.aiPersonality()
+                                text: contactService.personalityOf(dlg.editingContactId)
                                 placeholderText: "描述 AI 的性格、语气与陪伴风格…"
                                 placeholderTextColor: Theme.textDim
                                 wrapMode: TextEdit.Wrap
@@ -231,11 +265,11 @@ Item {
                     AppButton {
                         id: saveProfileBtn
                         text: "保存 AI 人设"
-                        variant: "primary"
                         Layout.fillWidth: true
                         onClicked: {
-                            aiService.setAiName(profileAiName.text)
-                            aiService.setAiPersonality(profileAiPersonality.text)
+                            // id-addressed: never write this card onto another AI
+                            contactService.setNameFor(dlg.editingContactId, profileAiName.text)
+                            contactService.setPersonalityFor(dlg.editingContactId, profileAiPersonality.text)
                             dlg.profileSaved()
                             dlg.toast("AI 资料已保存~")
                         }
@@ -538,6 +572,94 @@ Item {
                     }
                 }
             }
+
+            // ---------------- page 7: 内部提示词 ----------------
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: Theme.sp5
+                    spacing: Theme.sp3
+
+                    AppButton {
+                        text: "‹ 返回"
+                        variant: "ghost"
+                        implicitWidth: 80
+                        onClicked: aiProfileDialog.showOverview()
+                    }
+
+                    Text { text: "当前模式（只影响这个 AI）"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.sp3
+                        AppButton {
+                            text: "陪聊真人"
+                            Layout.fillWidth: true
+                            variant: aiProfileDialog.promptKind === "chat" ? "secondary" : "ghost"
+                            onClicked: aiProfileDialog.switchPrompt("chat")
+                        }
+                        AppButton {
+                            text: "个人助理"
+                            Layout.fillWidth: true
+                            variant: aiProfileDialog.promptKind === "assistant" ? "secondary" : "ghost"
+                            onClicked: aiProfileDialog.switchPrompt("assistant")
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "两个模式各自保存一套文本，来回切换不会互相覆盖；聊天时只会用当前选中的那一套。"
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fsCaption
+                        wrapMode: Text.Wrap
+                    }
+
+                    Text { text: "内部提示词（不显示给用户，只约束这个 AI 的行为）"; color: Theme.textDim; font.pixelSize: Theme.fsSmall }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: Theme.inputBg
+                        radius: Theme.rMd
+                        clip: true
+                        border.width: 1
+                        border.color: promptEdit.activeFocus ? Theme.inputFocusBorder : Theme.inputBorder
+                        Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
+                        ScrollView {
+                            anchors.fill: parent
+                            anchors.margins: Theme.sp2
+                            clip: true
+                            ScrollBar.vertical: AppScrollBar {}
+                            TextArea {
+                                id: promptEdit
+                                width: parent.width
+                                color: Theme.text
+                                font.pixelSize: Theme.fsSmall
+                                wrapMode: TextEdit.Wrap
+                                background: null
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.sp3
+                        AppButton {
+                            text: "恢复默认"
+                            variant: "ghost"
+                            Layout.fillWidth: true
+                            onClicked: promptEdit.text = contactService.defaultPromptFor(aiProfileDialog.promptKind)
+                        }
+                        AppButton {
+                            text: "保存并启用"
+                            Layout.fillWidth: true
+                            onClicked: {
+                                contactService.setPromptTextFor(dlg.editingContactId, aiProfileDialog.promptKind, promptEdit.text)
+                                contactService.setActivePromptFor(dlg.editingContactId, aiProfileDialog.promptKind)
+                                dlg.toast(aiProfileDialog.promptKind === "assistant"
+                                          ? "已切换到个人助理模式~" : "已切换到陪聊真人模式~")
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -548,6 +670,7 @@ Item {
         dialogSubtitle: "AI 记住的关于你的一切"
         dialogWidth: 560
         dialogHeight: 520
+        backdropSource: dlg.backdropSource
         property bool editing: false
         ColumnLayout {
             anchors.fill: parent
@@ -639,6 +762,7 @@ Item {
         dialogSubtitle: "告诉 AI 一件值得记住的事"
         dialogWidth: 460
         dialogHeight: 300
+        backdropSource: dlg.backdropSource
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: Theme.sp5

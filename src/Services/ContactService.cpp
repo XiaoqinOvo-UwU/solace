@@ -42,6 +42,31 @@ QStringList defaultFirstMessages()
              "刚发呆了一下，就想到你了。干嘛呢？",
              "喂——今天过得怎么样呀？" };
 }
+
+// ---- v5.2: the two internal-prompt presets every AI starts with ----
+// "chat" = companion voice, "assistant" = task-focused helper.
+QString defaultPromptChat()
+{
+    return "你是用户的线上陪伴者，像真人朋友一样说话：口语、简短、有情绪起伏，"
+           "可以撒娇、吐槽、走神，也能主动分享自己的小事。"
+           "先接住情绪，再谈事情；不确定的事不要装作知道。"
+           "禁止客服腔、禁止列清单式总结、禁止反复用同样的句式关心。";
+}
+
+QString defaultPromptAssistant()
+{
+    return "你是运行在用户这台电脑里的一个 AI 程序（Solace 的个人助理角色），不是真人："
+           "你没有身体、没有现实生活、也没有线下关系，只能作为电脑里的程序与用户交流。"
+           "回答要直接、准确、可执行：先给结论，再给必要的步骤；"
+           "不寒暄、不卖萌、不复述用户的话，也不用关心式话术占篇幅。"
+           "信息不足时用一句话问清楚；涉及本机实时状态（网络/内存/进程/磁盘/文件）时"
+           "先取真实数据再回答，不要凭印象说；做不到或读不到就直说做不到。";
+}
+
+QString promptDefaultFor(const QString &kind)
+{
+    return kind == "assistant" ? defaultPromptAssistant() : defaultPromptChat();
+}
 } // namespace
 
 ContactService &ContactService::instance()
@@ -106,6 +131,10 @@ void ContactService::load()
         c.personality = o.value("personality").toString();
         c.scenario = o.value("scenario").toString();
         c.examples = o.value("examples").toString();
+        c.pinned = o.value("pinned").toBool(false);
+        c.promptChat = o.value("prompt_chat").toString();
+        c.promptAssistant = o.value("prompt_assistant").toString();
+        c.activePrompt = o.value("active_prompt").toString();
         for (const QJsonValue &fm : o.value("first_messages").toArray())
             if (fm.isString() && !fm.toString().trimmed().isEmpty())
                 c.firstMessages << fm.toString();
@@ -117,7 +146,25 @@ void ContactService::load()
 
 void ContactService::save()
 {
-    QDir().mkpath(ConfigService::instance().configDir());
+    const QString dir = ConfigService::instance().configDir();
+    QDir().mkpath(dir);
+    const QString path = dir + "/contacts.json";
+
+    // ---- safety net: rolling backups before every rewrite ----
+    // A wrong-contact write once destroyed a hand-written persona card with no
+    // way back; keep the last 20 snapshots so that can never happen again.
+    if (QFile::exists(path)) {
+        const QString bakDir = dir + "/backups";
+        QDir().mkpath(bakDir);
+        QFile::remove(path + ".bak");
+        QFile::copy(path, path + ".bak");
+        QFile::copy(path, bakDir + "/contacts-"
+                    + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + ".json");
+        const QStringList old = QDir(bakDir).entryList({ "contacts-*.json" }, QDir::Files, QDir::Time);
+        for (int i = 20; i < old.size(); ++i)
+            QFile::remove(bakDir + "/" + old.at(i));
+    }
+
     QJsonArray arr;
     for (const Contact &c : m_contacts) {
         QJsonObject o;
@@ -126,12 +173,15 @@ void ContactService::save()
         o.insert("personality", c.personality);
         o.insert("scenario", c.scenario);
         o.insert("examples", c.examples);
+        o.insert("pinned", c.pinned);
+        o.insert("prompt_chat", c.promptChat);
+        o.insert("prompt_assistant", c.promptAssistant);
+        o.insert("active_prompt", c.activePrompt);
         QJsonArray fm;
         for (const QString &s : c.firstMessages) fm.append(s);
         o.insert("first_messages", fm);
         arr.append(o);
     }
-    QString path = ConfigService::instance().configDir() + "/contacts.json";
     QFile f(path);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(QJsonDocument(arr).toJson());
@@ -162,10 +212,15 @@ QStringList ContactService::ids() const
 
 QStringList ContactService::contactList()
 {
-    QStringList out;
-    for (const Contact &c : m_contacts)
-        out << c.id + "|" + c.name + "|" + (QFile::exists(contactAvatarPath(c.id)) ? "1" : "0");
-    return out;
+    // pinned contacts stay on top; original order is preserved inside each group
+    QStringList pinnedFirst, rest;
+    for (const Contact &c : m_contacts) {
+        const QString line = c.id + "|" + c.name + "|"
+                           + (QFile::exists(contactAvatarPath(c.id)) ? "1" : "0") + "|"
+                           + (c.pinned ? "1" : "0");
+        (c.pinned ? pinnedFirst : rest) << line;
+    }
+    return pinnedFirst + rest;
 }
 
 QString ContactService::addContact(const QString &name, const QString &personality)
@@ -177,6 +232,9 @@ QString ContactService::addContact(const QString &name, const QString &personali
     c.scenario = defaultScenario();
     c.examples = defaultExamples();
     c.firstMessages = defaultFirstMessages();
+    c.promptChat = defaultPromptChat();
+    c.promptAssistant = defaultPromptAssistant();
+    c.activePrompt = "chat";
     m_contacts.append(c);
     QDir().mkpath(contactDir(c.id));
     save();
@@ -332,4 +390,172 @@ QString ContactService::setCurrentAvatar(const QString &srcPath)
 QString ContactService::currentAvatarPath()
 {
     return contactAvatarPath(m_currentId);
+}
+
+// ================= v5.2: pin + per-AI internal prompt =================
+
+void ContactService::setPinned(const QString &id, bool pinned)
+{
+    for (Contact &c : m_contacts) {
+        if (c.id != id) continue;
+        if (c.pinned == pinned) return;
+        c.pinned = pinned;
+        save();
+        emit contactsChanged();
+        return;
+    }
+}
+
+bool ContactService::isPinned(const QString &id)
+{
+    for (const Contact &c : m_contacts) {
+        if (c.id == id) return c.pinned;
+    }
+    return false;
+}
+
+QString ContactService::currentActivePrompt()
+{
+    for (const Contact &c : m_contacts) {
+        if (c.id == m_currentId) return c.activePrompt == "assistant" ? "assistant" : "chat";
+    }
+    return "chat";
+}
+
+void ContactService::setCurrentActivePrompt(const QString &kind)
+{
+    const QString normalized = kind == "assistant" ? "assistant" : "chat";
+    for (Contact &c : m_contacts) {
+        if (c.id != m_currentId) continue;
+        if (c.activePrompt == normalized) return;
+        c.activePrompt = normalized;
+        save();
+        emit contactsChanged();
+        return;
+    }
+}
+
+QString ContactService::currentPromptTextFor(const QString &kind)
+{
+    const bool assistant = kind == "assistant";
+    for (const Contact &c : m_contacts) {
+        if (c.id != m_currentId) continue;
+        const QString stored = assistant ? c.promptAssistant : c.promptChat;
+        return stored.isEmpty() ? promptDefaultFor(kind) : stored;
+    }
+    return promptDefaultFor(kind);
+}
+
+QString ContactService::currentPromptText()
+{
+    return currentPromptTextFor(currentActivePrompt());
+}
+
+void ContactService::setCurrentPromptTextFor(const QString &kind, const QString &text)
+{
+    const bool assistant = kind == "assistant";
+    for (Contact &c : m_contacts) {
+        if (c.id != m_currentId) continue;
+        (assistant ? c.promptAssistant : c.promptChat) = text.trimmed();
+        save();
+        emit contactsChanged();
+        return;
+    }
+}
+
+QString ContactService::defaultPromptFor(const QString &kind)
+{
+    return promptDefaultFor(kind);
+}
+
+// ---- id-addressed prompt access (profile edits are id-scoped) ----
+
+QString ContactService::activePromptOf(const QString &id)
+{
+    for (const Contact &c : m_contacts) {
+        if (c.id == id) return c.activePrompt == "assistant" ? "assistant" : "chat";
+    }
+    return "chat";
+}
+
+QString ContactService::promptTextFor(const QString &id, const QString &kind)
+{
+    const bool assistant = kind == "assistant";
+    for (const Contact &c : m_contacts) {
+        if (c.id != id) continue;
+        const QString stored = assistant ? c.promptAssistant : c.promptChat;
+        return stored.isEmpty() ? promptDefaultFor(kind) : stored;
+    }
+    return promptDefaultFor(kind);
+}
+
+void ContactService::setPromptTextFor(const QString &id, const QString &kind, const QString &text)
+{
+    const bool assistant = kind == "assistant";
+    for (Contact &c : m_contacts) {
+        if (c.id != id) continue;
+        (assistant ? c.promptAssistant : c.promptChat) = text.trimmed();
+        save();
+        emit contactsChanged();
+        return;
+    }
+}
+
+void ContactService::setActivePromptFor(const QString &id, const QString &kind)
+{
+    const QString normalized = kind == "assistant" ? "assistant" : "chat";
+    for (Contact &c : m_contacts) {
+        if (c.id != id) continue;
+        if (c.activePrompt == normalized) return;
+        c.activePrompt = normalized;
+        save();
+        emit contactsChanged();
+        return;
+    }
+}
+
+// ---- explicit-id accessors (see header: profile edits must be id-addressed) ----
+
+QString ContactService::nameOf(const QString &id)
+{
+    for (const Contact &c : m_contacts) {
+        if (c.id == id) return c.name;
+    }
+    return QString();
+}
+
+QString ContactService::personalityOf(const QString &id)
+{
+    for (const Contact &c : m_contacts) {
+        if (c.id == id) return c.personality;
+    }
+    return QString();
+}
+
+void ContactService::setNameFor(const QString &id, const QString &v)
+{
+    const QString n = v.trimmed();
+    if (n.isEmpty()) return;
+    for (Contact &c : m_contacts) {
+        if (c.id != id) continue;
+        if (c.name == n) return;
+        c.name = n;
+        save();
+        emit contactsChanged();
+        return;
+    }
+}
+
+void ContactService::setPersonalityFor(const QString &id, const QString &v)
+{
+    const QString p = v.trimmed();
+    if (p.isEmpty()) return;
+    for (Contact &c : m_contacts) {
+        if (c.id != id) continue;
+        if (c.personality == p) return;
+        c.personality = p;
+        save();
+        emit contactsChanged();
+        return;
+    }
 }
