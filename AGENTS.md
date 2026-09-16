@@ -21,3 +21,4 @@
 - QML 规范：8px 网格、圆角 rXl=14、hover 中性灰、卡片 surface+hairline、禁 emoji 图标、DialogContainer 单一容器。
 - QML 崩溃用 `qmlscene -I` 测试组件加载，`qmllint` 查语法。
 - `Qt.rgba()` 不归一化 0-255，必须用 `X/255` 小数形式，否则 >1 被钳成白色。
+- **打包必做两步（v5.2.0 踩过坑）**：① `windeployqt` 会漏 MinGW 运行库（`libgcc_s_seh-1/libstdc++-6`）与 ICU/harfbuzz/freetype 等间接依赖，必须用 `objdump -p` 递归展开依赖闭包补齐 `dist`；② **实测 `dist\Solace.exe` 能启动**再打安装包，否则会发出"装完打不开"的包。
